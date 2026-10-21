@@ -1,0 +1,20 @@
+# GSM8K dataset configuration
+# Grade School Math 8K - math word problems with step-by-step solutions
+
+# Hydra instantiation target
+_target_: miol.data.HuggingFaceDatasetBuilder
+
+dataset_name: gsm8k
+
+num_train_samples: -1 # -1 = use all available data (7473 train samples), or specify a number
+num_eval_samples: -1 # -1 = use all available data (1319 test samples), or specify a number
+
+# HuggingFace dataset parameters
+hf_dataset: openai/gsm8k
+hf_config: main
+hf_prompt_col: question
+hf_completion_col: answer
+hf_eval_split: test # GSM8K uses 'test' instead of 'validation' for eval split
+
+# Chat template system prompt
+hf_system_prompt: "You are a helpful math tutor that solves grade school math problems step by step."

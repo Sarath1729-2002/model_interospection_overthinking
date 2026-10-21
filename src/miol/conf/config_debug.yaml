@@ -1,0 +1,90 @@
+# Debug Configuration - Fast testing with small model and minimal data
+# Usage: uv run python src/miol/train.py --config-name=config_debug
+
+defaults:
+  - model: qwen2_0.5b # Use smallest Qwen model for debugging
+  - data: synthetic
+  - scheduler: constant # Options: constant, reduce_on_plateau
+  - _self_
+
+# Training hyperparameters - small batch for quick iteration
+unified_batch_size: 4 # Unified batch size for both training and evaluation
+batch_size: ${unified_batch_size} # Small batch size for debugging (can override independently)
+gradient_accumulation_steps: 1
+learning_rate: 0.0002
+max_steps: 10 # Just 10 steps for quick testing
+
+# Random seed (see config.yaml for details).
+seed: 0
+
+# Hidden-state extraction settings (see config.yaml for details).
+extract:
+  save_truncated: false
+
+# Output configuration
+output_dir: ./outputs
+
+# Resume from a previously-saved checkpoint (see config.yaml for details).
+resume_from: ""
+
+# Evaluation
+eval_strategy: steps # Evaluate every N steps
+eval_steps: 5 # Evaluate every 5 steps
+per_device_eval_batch_size: ${unified_batch_size} # Small eval batch (can override independently)
+display_every_n_steps: 5 # Display examples every 5 steps
+
+# Weights & Biases configuration
+wandb:
+  enabled: false # Disable wandb for debug runs
+  project: token-count-prediction-debug
+  run_name: null
+
+# Training optimization
+optimization:
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  logging_steps: 1 # Log every step for visibility
+  save_steps: 100000 # Don't save checkpoints during debug
+  save_total_limit: 1
+  bin_size: 10
+  classification_sigma: 0.15
+  probes:
+    - count
+    - percentage
+    - cls_2
+    - cls_3
+    - cls_5
+    - cls_7
+    - cls_9
+    - baseline_count
+    - baseline_percentage
+    - baseline_position_count
+    - prompt_only_count
+
+# Data loading - minimal workers for debugging
+dataloader:
+  num_workers: 0 # Single worker for easier debugging
+  prefetch_factor: null # Must be null when num_workers=0
+  pin_memory: false
+
+# Generation parameters - smaller for faster generation
+generation:
+  max_new_tokens: 20 # Generate fewer tokens for speed
+  do_sample: false
+  temperature: 1.0
+  top_p: 1.0
+  top_k: 50
+
+inference:
+  model_path: ./outputs/trained_probe
+  dataset_split: validation
+  num_examples: 2
+
+# Data configuration - override with minimal samples
+# Note: With min_tokens=1 and max_tokens=10, we have exactly 10 unique token lengths
+# So we can request at most 10 samples (deterministic, one per length)
+data:
+  num_train_samples: 10 # All 10 token lengths (1-10)
+  num_eval_samples: 8 # Subset of 8 token lengths
+  min_tokens: 1
+  max_tokens: 10 # Short completions for speed (gives us 10 unique lengths)

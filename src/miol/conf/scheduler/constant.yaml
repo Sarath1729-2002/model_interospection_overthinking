@@ -1,0 +1,11 @@
+# Constant learning rate scheduler
+# No decay - learning rate remains constant throughout training
+
+scheduler_factory:
+  _target_: transformers.get_constant_schedule
+  _partial_: true
+
+# No additional TrainingArguments parameters needed for constant scheduler
+metric_for_best_model: null
+greater_is_better: null
+load_best_model_at_end: null

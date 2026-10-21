@@ -1,0 +1,30 @@
+# Hendrycks MATH dataset (competition_math)
+# Multi-step math reasoning at competition difficulty. Concatenates the seven
+# subject configs into a single train / test dataset. Use this when you want a
+# harder counterpart to GSM8K — solutions are longer, restarts are more common,
+# so the non-monotonicity / dynamic-re-estimation signal is denser here.
+
+# Hydra instantiation target
+_target_: miol.data.HuggingFaceDatasetBuilder
+
+dataset_name: math
+
+num_train_samples: -1 # -1 = use all available data (~7.5k after concat), or specify a number
+num_eval_samples: -1  # -1 = use all available data (~5k after concat), or specify a number
+
+# HuggingFace dataset parameters
+hf_dataset: EleutherAI/hendrycks_math
+hf_config:
+  - algebra
+  - counting_and_probability
+  - geometry
+  - intermediate_algebra
+  - number_theory
+  - prealgebra
+  - precalculus
+hf_prompt_col: problem
+hf_completion_col:
+hf_eval_split: test  # MATH uses 'test' for the held-out split
+
+# Chat template system prompt
+hf_system_prompt: "You are a helpful math tutor that solves math problems step by step."

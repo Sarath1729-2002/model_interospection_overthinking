@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Probe Evaluation Dashboard</title>
+<link rel="stylesheet" href="dashboard.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header>
+  <h1>Probe Evaluation Dashboard</h1>
+  <div id="loader">
+    <label>
+      Load results JSON:
+      <input type="file" id="file-input" accept=".json" />
+    </label>
+    <span id="loader-status"></span>
+  </div>
+</header>
+
+<!-- List view -->
+<section id="list-view" class="view hidden">
+  <div class="list-controls">
+    <label>Sort by:
+      <select id="sort-metric"></select>
+    </label>
+    <label>Order:
+      <select id="sort-order">
+        <option value="asc">Best first (ascending)</option>
+        <option value="desc">Worst first (descending)</option>
+      </select>
+    </label>
+    <label>
+      <input type="checkbox" id="hide-no-eos" checked />
+      Hide sequences without EOS
+    </label>
+  </div>
+  <div id="list-meta"></div>
+  <div class="table-wrap">
+    <table id="examples-table">
+      <thead><tr id="examples-thead"></tr></thead>
+      <tbody id="examples-tbody"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Detail view -->
+<section id="detail-view" class="view hidden">
+  <button id="back-to-list">← Back to list</button>
+  <h2 id="detail-title"></h2>
+
+  <section class="metadata-block">
+    <h3>Metadata</h3>
+    <div id="detail-metadata"></div>
+  </section>
+
+  <section class="column-toggles-block">
+    <h3>Columns</h3>
+    <div id="column-toggles"></div>
+  </section>
+
+  <section class="token-table-block">
+    <h3>Per-token predictions</h3>
+    <div class="token-table-controls">
+      <label>Rolling avg window (tokens):
+        <input id="token-rolling-window" type="number" min="1" step="1" value="10" style="width:60px" />
+      </label>
+      <span style="color:#666;font-size:11px;">(applies to "avg" companion columns)</span>
+    </div>
+    <div class="table-wrap">
+      <table id="token-table">
+        <thead><tr id="token-thead"></tr></thead>
+        <tbody id="token-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="chart-block">
+    <h3>Chart</h3>
+    <div class="chart-controls">
+      <label>Bars (y-axis):
+        <select id="chart-series"></select>
+      </label>
+      <label>Ground truth line:
+        <select id="chart-groundtruth">
+          <option value="none">(none)</option>
+          <option value="remaining_count">Remaining count</option>
+          <option value="percentage">Percentage</option>
+        </select>
+      </label>
+      <label>Smoothing σ:
+        <input id="chart-smoothing-sigma" type="number" min="0" step="0.5" value="0" style="width:70px" />
+        <span style="color:#666;font-size:11px;">(0 = off; tokens, e.g. 3)</span>
+      </label>
+    </div>
+    <canvas id="detail-chart" height="120"></canvas>
+  </section>
+</section>
+
+<script src="dashboard.js"></script>
+</body>
+</html>

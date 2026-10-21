@@ -1,0 +1,7 @@
+# Olmo-3-7B Model Configuration
+
+model_name: allenai/Olmo-3-7B-Instruct
+probe_hidden_layer: "all" # Which hidden layer to use: -1=last, -2=second-to-last, 0=first, 1=second, "all"=concatenate all
+generation_config:
+  temperature: 0.6
+  top_p: 0.95

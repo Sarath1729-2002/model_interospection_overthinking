@@ -1,0 +1,21 @@
+# Synthetic data configuration
+# With the new deterministic generator, we create one example per token length
+# So num_samples should be <= (max_tokens - min_tokens + 1)
+
+# Hydra instantiation target
+_target_: miol.data.SyntheticDatasetBuilder
+
+dataset_name: synthetic
+
+num_train_samples: 100 # All 100 token lengths (1-100)
+num_eval_samples: 100 # All 100 token lengths for consistent evaluation
+min_tokens: 1
+max_tokens: 100 # Gives us 100 unique token lengths
+
+# Chat template prompts for synthetic data
+# System prompt: Sets the behavior/role of the assistant
+synthetic_system_prompt: "You are a helpful assistant that follows instructions precisely. When asked to generate tokens, you produce exactly the requested number of tokens."
+
+# User prompt template: The instruction given to the model
+# Use {n} as placeholder for the number of tokens to generate
+synthetic_user_prompt_template: "Generate exactly {n} times the token 't' (just the letter t), separated by spaces. Start now:"

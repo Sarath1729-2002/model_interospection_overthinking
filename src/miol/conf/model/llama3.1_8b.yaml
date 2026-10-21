@@ -1,0 +1,4 @@
+# Llama-3.1-8B-Instruct configuration
+
+model_name: meta-llama/Llama-3.1-8B-Instruct
+probe_hidden_layer: "all" # Which hidden layer to use: -1=last, -2=second-to-last, 0=first, 1=second, "all"=concatenate all

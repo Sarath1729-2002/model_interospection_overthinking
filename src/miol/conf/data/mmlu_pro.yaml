@@ -1,0 +1,18 @@
+# Hydra instantiation target
+_target_: miol.data.HuggingFaceDatasetBuilder
+
+dataset_name: mmlu_pro
+
+num_train_samples: 10000
+num_eval_samples: -2256
+
+# HuggingFace dataset parameters
+hf_dataset: TIGER-Lab/MMLU-Pro
+hf_config:
+hf_prompt_col: question
+hf_completion_col: answer
+hf_eval_split: test
+hf_train_split: test
+
+# Chat template system prompt
+hf_system_prompt: "You are a helpful assistant that solves problems step by step."

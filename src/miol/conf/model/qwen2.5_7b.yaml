@@ -1,0 +1,16 @@
+# Qwen2.5-7B-Instruct configuration
+# 28 layers, hidden size 3584 -> 29 hidden states, "all" concatenates to 103,936 dims.
+
+model_name: Qwen/Qwen2.5-7B-Instruct
+probe_hidden_layer: "all" # Which hidden layer to use: -1=last, -2=second-to-last, 0=first, 1=second, "all"=concatenate all
+generation_config:
+  # Sampling settings recommended for Qwen2.5-Instruct (same values as config.yaml).
+  temperature: 0.7
+  top_p: 0.8
+  top_k: 20
+  # The checkpoint's generation_config.json ships repetition_penalty=1.05, which
+  # generate() would otherwise inherit silently. The other models in this study
+  # run without one, and a history-dependent logit penalty is a nuisance for a
+  # length-probing experiment, so it is pinned off here. Remove this line to use
+  # the checkpoint default instead.
+  repetition_penalty: 1.0

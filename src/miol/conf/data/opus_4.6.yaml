@@ -1,0 +1,18 @@
+
+# Hydra instantiation target
+_target_: miol.data.HuggingFaceDatasetBuilder
+
+dataset_name: opus_4.6
+
+num_train_samples: -1 
+num_eval_samples: -1
+
+# HuggingFace dataset parameters
+hf_dataset: nohurry/Opus-4.6-Reasoning-3000x-filtered
+hf_config:
+hf_prompt_col: problem
+hf_completion_col:
+hf_eval_split: train
+
+# Chat template system prompt
+hf_system_prompt: "You are a helpful assistant that solves problems step by step."

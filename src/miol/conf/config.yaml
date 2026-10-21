@@ -1,0 +1,103 @@
+# Training Configuration
+# This file contains all training hyperparameters and settings
+# Note: Only the token count probe is trained - the base model is frozen
+
+defaults:
+  - model: qwen3_4b # Options: qwen3_4b, qwen3_30b, qwen2_0.5b
+  - data: gsm8k # Options: synthetic, msmarco
+  - scheduler: reduce_on_plateau # Options: constant, reduce_on_plateau
+  - _self_
+
+# Training hyperparameters
+unified_batch_size: 50 # Unified batch size for both training and evaluation
+batch_size: ${unified_batch_size} # Batch size per device (can override independently)
+gradient_accumulation_steps: 1 # Number of gradient accumulation steps
+learning_rate: 0.0002 # Learning rate (2e-4)
+max_steps: 4000 # Total number of training steps (replaces num_epochs)
+
+# Random seed. Set independently per run for multi-seed experiments. Threads
+# through to torch / numpy / Python random / HF Trainer / dataloader sampler /
+# generation sampling, and is appended to output_dir so multi-seed runs don't
+# collide on disk.
+seed: 0
+
+# Hidden-state extraction settings (used by extract_hidden_states.py).
+extract:
+  # When false, samples whose generation did not terminate naturally
+  # (`has_eos=False`) are not written to disk as `.safetensors` — their hidden
+  # states would be loss-masked at training time anyway, and the bytes are
+  # often substantial for large models. The per-sample `.json` metadata is
+  # always kept so truncated samples remain auditable.
+  # Set to true to preserve the original behavior (save everything).
+  save_truncated: false
+  # Throughput knobs (do not change the saved data format).
+  batch_size: 32            # prompts generated per batch, per GPU
+  forward_batch_size: 16    # sequences per teacher-forced forward pass, per GPU
+  writer_threads: 4         # background threads copying/writing samples to disk
+  max_inflight_batches: 2   # forward sub-batches of hidden states held in host RAM
+  dist_timeout_hours: 12    # torch.distributed timeout (ranks only sync at the end)
+
+# Output configuration
+output_dir: ./outputs # Output directory for model checkpoints
+
+# Resume training from a previously-saved checkpoint or trained_probe directory.
+# When set, the config is loaded from {resume_from}/config.yaml (or its
+# parent's trained_probe/config.yaml). Only resume_from, max_steps, output_dir,
+# and wandb.run_name from the current invocation can override the saved snapshot.
+resume_from: ""
+
+# Evaluation
+eval_strategy: steps # Evaluate every N steps
+eval_steps: 10
+per_device_eval_batch_size: ${unified_batch_size} # Batch size for evaluation (can override independently)
+display_every_n_steps: 10 # Display example predictions every N steps
+
+# Weights & Biases configuration
+wandb:
+  enabled: true # Set to false to disable wandb logging
+  project: token-count-prediction # W&B project name
+  run_name: null # W&B run name (null = auto-generated)
+
+# Training optimization
+optimization:
+  weight_decay: 0.01
+  max_grad_norm: 10.0 # Gradient clipping
+  logging_steps: 10
+  save_steps: 100
+  save_total_limit: null # Unlimited checkpoints (set to an integer to limit)
+  loss_function: mse # Loss function to use: 'mse', 'mae', 'log_mse', 'log_mae'
+  bin_size: 10 # Width of token-length bins for grouping MAE/MAPE metrics (e.g. 10 = bins [0-9], [10-19], ...)
+  classification_sigma: 0.15 # Gaussian kernel width for soft classification labels
+  probes: # Probe heads to train simultaneously in offline multi-probe mode
+    - count                    # regression: remaining token count
+    - log_count                # regression: log(1 + remaining count); metrics reported in count space
+    - percentage               # regression: remaining token percentage [0,1]
+    - cls_2                    # classification: 2 bins
+    - cls_3                    # classification: 3 bins
+    - cls_5                    # classification: 5 bins
+    - cls_7                    # classification: 7 bins
+    - cls_9                    # classification: 9 bins
+    - baseline_count           # baseline: predict count with no input (dataset mean)
+    - baseline_percentage      # baseline: predict percentage with no input (~0.5)
+    - baseline_position_count  # baseline: predict count from completion position only
+    - prompt_only_count        # predict T from prompt-end hidden state; eval everywhere
+
+# Data loading
+dataloader:
+  num_workers: 16
+  prefetch_factor: 2
+  pin_memory: true
+
+# Generation parameters
+generation:
+  max_new_tokens: 300 # Maximum number of tokens to generate
+  do_sample: true # Whether to use sampling (true) or greedy decoding (false)
+  temperature: 0.7 # Sampling temperature (lower = more deterministic, higher = more random)
+  top_p: 0.8 # Nucleus sampling: only consider tokens with cumulative probability >= top_p
+  top_k: 20 # Top-k sampling: only consider top k most likely tokens
+
+# Inference defaults
+inference:
+  model_path: ./outputs/trained_probe
+  dataset_split: validation
+  num_examples: 3

@@ -1,0 +1,5 @@
+# Qwen3-4B-Instruct-2507 Model Configuration
+# 4B parameter model for balanced performance and speed
+
+model_name: Qwen/Qwen3-4B-Instruct-2507
+probe_hidden_layer: "all" # Which hidden layer to use: -1=last, -2=second-to-last, 0=first, 1=second, "all"=concatenate all

@@ -1,0 +1,63 @@
+# Running on Compute Canada (Alliance) - from the login node
+
+Everything below is typed on the **login node** (`ssh you@<cluster>.alliancecan.ca`). You never run the heavy
+work yourself: `submit.sh` queues a chain of SLURM jobs: extract once, then one job per seed (train, evaluate, layer sweep) in order, then a final job that combines the seeds, on 4 GPUs each (data parallel).
+Slack reports arrive by e-mail-to-Slack at each stage.
+
+## 0. Get the code onto the cluster
+```bash
+git clone <your model_overthinking_probe repo> && cd model_overthinking_probe
+# (or copy the tarball:  tar xzf model_overthinking_probe.tar.gz && cd model_overthinking_probe)
+```
+
+## 1. Fill in two values in `cluster/config.sh`
+* `SLACK_EMAIL`: your personal Slack forwarding address, which delivers to your DM with Slackbot. Slack: profile picture -> Preferences -> Messages & media -> "Bring emails into Slack" -> Get a Forwarding Address. (A channel address is paid-plan only and may be admin-restricted.)
+* `SBATCH_ACCOUNT`: your allocation, e.g. `def-<pi>`. List yours: `sacctmgr show assoc user=$USER format=account%30`.
+
+## 2. One-time setup (needs internet, so login node only, ~10-20 min)
+```bash
+bash cluster/setup.sh
+```
+Makes the Python env, downloads Qwen2.5-7B-Instruct + GSM8K into `$SCRATCH/model_overthinking_probe/hf_home`
+(compute nodes are offline), and prints the tokenizer/EOS/generation_config it found. Read that output once.
+
+## 3. Test your Slack address (10 seconds)
+```bash
+source cluster/config.sh && notify "hello from the cluster" "test"
+```
+If nothing shows up in Slack: the cluster may have no `mail` command (then you only get the SLURM BEGIN/END/FAIL
+mails, if any, and the log lines), or Slack rejects that sender. Try a personal address first to separate the two.
+
+## 4. Rehearse (minutes), then run
+```bash
+SMOKE=1 bash cluster/submit.sh      # 64 train / 32 eval prompts, 40 steps - checks the whole chain
+bash cluster/submit.sh              # the full run: extract -> seed 0 -> seed 1 -> seed 2 -> final combine (seed 0 results reach Slack before seeds 1-2 start)
+LAYER_SWEEP=0 bash cluster/submit.sh   # same without the layer sweep
+```
+`submit.sh` prints three job ids. Watch with `squeue -u $USER`; logs are `mop-<jobid>.out` in the repo folder
+(`tail -f mop-<jobid>.out`). If a job dies or times out, fix/extend and run `submit.sh` again: extraction resumes
+where it stopped (finished samples are skipped).
+
+In the rehearsal's extraction log, look at `samples/s` and `generated tokens/s` per rank and extrapolate the full time.
+
+## 5. What you get on Slack (your DM)
+`pipeline SUBMITTED` -> `extraction STARTED/DONE` (truncation rate, token lengths, disk used) ->
+**seed 0:** `training STARTED` -> `main results ready` (MAE of every probe and baseline) -> `layer sweep STARTED` -> `layer curve ready` (MAE per layer, best layer) ->
+seed 1 and seed 2 repeat the same four messages -> `ALL SEEDS DONE - final results` (all-seed summary + layer curve with seed error bars).
+Any failure sends `FAILED: ...` with the last 25 log lines. SLURM also mails BEGIN/END/FAIL/80%-of-time to the same address.
+Plots are not attached to the message (plain-text mail); they are on disk (see 6).
+
+## 6. After it finishes
+Results: `$SCRATCH/model_overthinking_probe/outputs/qwen2.5_7b-gsm8k/` (symlinked as `outputs/` in the repo):
+`hidden_states/` (cache + `audit.txt`), `summary.txt`, and per seed `qwen2.5_7b-gsm8k-<seed>/seed_<seed>/{trained_probe,eval_results.json}`.
+Per seed: `summary_seed<N>.txt`, `layer_sweep_seed<N>/`. Final: `summary.txt` and `layer_sweep/{layer_sweep.png,layer_sweep.csv,layer_sweep.json,summary.txt}` (per-layer MAE with 95% CI and seed std).
+W&B ran offline; upload from the login node: `wandb sync $SCRATCH/model_overthinking_probe/wandb/wandb/offline-run-*`.
+
+## Things to check, not assume
+* **Disk**: estimate ~0.6 TB for the full GSM8K cache (unverified; the audit prints real token counts). Check `diskusage_report`
+  before launching; scratch is purged after ~60 days of inactivity.
+* **Settings I chose** (all in `cluster/config.sh`): `MAX_NEW_TOKENS=1024` (repo default 300 would truncate GSM8K answers),
+  `repetition_penalty=1.0` (Qwen's checkpoint ships 1.05), `EVAL_STEPS=50/PATIENCE=0` (repo 10/5 is ~5x costlier I/O),
+  3 seeds. Exact repo cadence: `EVAL_STEPS=10 SCHED_PATIENCE=5 bash cluster/submit.sh`.
+* **GPU type**: add e.g. `--gpus-per-node=h100:4` by editing `COMMON=` in `cluster/submit.sh` if you need a specific GPU.
+* Not tested on a real cluster or with the real Qwen weights (this was built where those were unreachable); the rehearsal is the test.

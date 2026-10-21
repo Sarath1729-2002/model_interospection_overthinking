@@ -1,0 +1,18 @@
+# MS MARCO dataset configuration
+
+# Hydra instantiation target
+_target_: miol.data.HuggingFaceDatasetBuilder
+
+dataset_name: msmarco
+
+num_train_samples: -1 # -1 = use all available data, or specify a number
+num_eval_samples: 1000 # -1 = use all available data, or specify a number
+
+# HuggingFace dataset parameters
+hf_dataset: ms_marco
+hf_config: v2.1
+hf_prompt_col: query
+hf_completion_col: passages
+
+# Chat template system prompt
+hf_system_prompt: "You are a helpful assistant that provides relevant information in response to user queries."

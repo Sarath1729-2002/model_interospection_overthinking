@@ -1,0 +1,31 @@
+# Hidden states dataset configuration
+# For offline probe training using pre-extracted hidden states
+
+# Hydra instantiation target
+_target_: miol.data.HiddenStatesDatasetBuilder
+
+dataset_name: null
+
+# Path to directory containing saved hidden states (from extract_hidden_states.py)
+hidden_states_dir: ${output_dir}/hidden_states
+
+# Which layer to use for probe training
+# '-1' = last layer (default)
+# 'all' = concatenate all layers (one big 2-D tensor, single-probe-set training)
+# Can also use specific layer index (e.g., '0', '12', etc.)
+hidden_layer: ${model.probe_hidden_layer}
+
+# Multi-layer probe sweep: when set, every hidden-state probe is duplicated
+# per listed layer and trained simultaneously in one run, sharing a single
+# pass over the data so disk I/O is paid once per batch. The dataset returns
+# hidden_states with shape [seq_len, len(layers_to_train), hidden_size].
+#
+#   null               -> single-layer mode (use `hidden_layer` above).
+#   "all"              -> sweep every layer (resolved against the first sample).
+#   [0, 8, 16, ..., -1]
+#                      -> sweep the listed layers, in this order. Negative
+#                         indices are resolved per-sample against num_hidden_layers.
+#
+# Non-hidden-state probes (baselines with input_type=constant or position) are
+# not duplicated; they are trained once with no layer dimension.
+layers_to_train: null

@@ -1,0 +1,17 @@
+# Hydra instantiation target
+_target_: miol.data.HuggingFaceDatasetBuilder
+
+dataset_name: openthoughts-1k
+
+num_train_samples: 800 # -1 = use all available data (7473 train samples), or specify a number
+num_eval_samples: -200 # -1 = use all available data (1319 test samples), or specify a number
+
+# HuggingFace dataset parameters
+hf_dataset: ryanmarten/OpenThoughts-1k-sample
+hf_config: metadata
+hf_prompt_col: problem
+hf_completion_col: 
+hf_eval_split: train
+
+# Chat template system prompt
+hf_system_prompt: "You are a helpful assistant that solves problems step by step."

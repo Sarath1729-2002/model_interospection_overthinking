@@ -1,0 +1,10 @@
+# Qwen3-14B Model Configuration
+
+model_name: Qwen/Qwen3-14B
+probe_hidden_layer: "all" # Which hidden layer to use: -1=last, -2=second-to-last, 0=first, 1=second, "all"=concatenate all
+generation_config:
+  enable_thinking: false
+  temperature: 0.7
+  top_p: 0.8
+  top_k: 20
+  min_p: 0

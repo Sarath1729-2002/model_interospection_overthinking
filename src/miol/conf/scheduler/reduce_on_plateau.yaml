@@ -1,0 +1,19 @@
+# Reduce learning rate when MAE metric stops improving
+# Monitors eval_mae and reduces LR by factor if no improvement for patience steps
+
+scheduler_factory:
+  _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+  _partial_: true
+  mode: min # Minimize the metric (lower MAE is better)
+  factor: 0.5 # Multiply LR by 0.5 when reducing (new_lr = lr * 0.5)
+  patience: 5 # Number of eval steps with no improvement before reducing LR
+  threshold: 0.0001 # Minimum change to qualify as an improvement
+  threshold_mode: rel # Relative threshold (improvement = old_metric * (1 - threshold))
+  cooldown: 0 # Number of steps to wait before resuming normal operation
+  min_lr: 1.0e-7 # Minimum learning rate
+  eps: 1.0e-8 # Minimal decay applied to LR
+
+# TrainingArguments parameters for reduce_lr_on_plateau
+metric_for_best_model: mae
+greater_is_better: false
+load_best_model_at_end: true
