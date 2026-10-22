@@ -23,6 +23,109 @@ def is_main_process():
     return local_rank in [-1, 0]
 
 
+class ValPlateauController(TrainerCallback):
+    """Validation-driven control for offline multi-probe training.
+
+    After every evaluation (on the held-out VALIDATION split, never the test
+    split) it
+      1. gets each count-style head's pooled validation MAE (all-reduced, so
+         every rank sees identical numbers and makes identical decisions),
+      2. steps the LR schedulers of the non-canonical count heads on their own MAE,
+      3. keeps a CPU snapshot of every count head at ITS best validation MAE
+         (other heads follow the monitored best step),
+      4. requests an early stop when the monitored MAE (mean over the headline
+         `count` heads) has not improved by `min_delta` for `patience` evals,
+      5. at the end of training restores the best snapshots into the heads.
+    """
+
+    def __init__(self, patience=5, min_delta=0.25, stop=True):
+        self.trainer = None  # set after trainer construction
+        self.patience = int(patience)
+        self.min_delta = float(min_delta)
+        self.stop = bool(stop)
+        self.best = float("inf")          # monitored (mean over headline heads)
+        self.best_step = None
+        self.bad_evals = 0
+        self.best_head_mae = {}           # name -> best own MAE
+        self.best_head_step = {}          # name -> step of that best
+        self._state = {}                  # name -> cpu state_dict at best
+        self.history = []                 # [(step, monitored_mae)]
+
+    # -- helpers -----------------------------------------------------------
+    def _heads(self):
+        m = self.trainer.model
+        return (m.module if hasattr(m, "module") else m).heads
+
+    def _snapshot(self, name):
+        self._state[name] = {k: v.detach().cpu().clone() for k, v in self._heads()[name].state_dict().items()}
+
+    def _headline(self, per_head):
+        specs = self.trainer.probe_specs
+        return [n for n in per_head if specs[n].get("base_probe_name", n) == "count"]
+
+    # -- hooks -------------------------------------------------------------
+    def on_evaluate(self, args, state, control, **kwargs):
+        import math
+        tr = self.trainer
+        per_head = tr.consume_val_mae()
+        if not per_head:
+            return control
+        step = int(state.global_step)
+
+        for name, sched in tr._extra_schedulers.items():
+            v = per_head.get(name)
+            if v is not None and math.isfinite(v):
+                sched.step(v)
+
+        for name, v in per_head.items():
+            if math.isfinite(v) and v < self.best_head_mae.get(name, float("inf")):
+                self.best_head_mae[name], self.best_head_step[name] = v, step
+                self._snapshot(name)
+
+        headline = [n for n in self._headline(per_head) if math.isfinite(per_head[n])]
+        if not headline:
+            return control
+        mon = sum(per_head[n] for n in headline) / len(headline)
+        self.history.append((step, mon))
+        if mon < self.best - self.min_delta:
+            self.best, self.best_step, self.bad_evals = mon, step, 0
+            for name in self._heads().keys():          # heads without a val MAE follow the best step
+                if name not in per_head:
+                    self._snapshot(name)
+        else:
+            self.bad_evals += 1
+        if is_main_process():
+            print(f"[val] step {step}: monitored MAE {mon:.2f} (best {self.best:.2f} @ {self.best_step}); "
+                  f"{self.bad_evals}/{self.patience} evals without improvement")
+        if self.stop and self.bad_evals >= self.patience:
+            if is_main_process():
+                print(f"[early-stop] no improvement > {self.min_delta} for {self.patience} evals; stopping at step {step}")
+            control.should_training_stop = True
+        return control
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if not self._state:
+            return control
+        heads = self._heads()
+        for name, sd in self._state.items():
+            heads[name].load_state_dict(sd)
+        if is_main_process():
+            print(f"[val] restored {len(self._state)} heads to their own best validation step "
+                  f"(monitored MAE {self.best:.2f}, first reached at step {self.best_step})")
+            import json
+            out = {"best_monitored_mae": self.best, "best_step": self.best_step, "stopped_step": int(state.global_step),
+                   "patience": self.patience, "min_delta": self.min_delta,
+                   "best_head_step": self.best_head_step, "best_head_val_mae": self.best_head_mae,
+                   "history": self.history}
+            try:
+                os.makedirs(args.output_dir, exist_ok=True)
+                with open(os.path.join(args.output_dir, "early_stopping.json"), "w") as f:
+                    json.dump(out, f, indent=1)
+            except OSError as exc:
+                print(f"[warning] could not write early_stopping.json: {exc}")
+        return control
+
+
 class MAEPerBinCallback(TrainerCallback):
     """
     Callback that triggers MAE per bin computation and logging periodically based on steps.

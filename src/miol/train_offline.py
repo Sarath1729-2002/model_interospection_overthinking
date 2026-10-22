@@ -462,6 +462,17 @@ def _main_impl(cfg: DictConfig):
     else:
         train_dataset = dataset_builder.get_dataset(split='train')
         eval_dataset = dataset_builder.get_dataset(split='validation')
+        # Hold out part of TRAIN as the validation set that drives the LR
+        # scheduler, early stopping and best-head selection. The real eval
+        # (test) split is then touched only by evaluate_probes.py at the end.
+        val_fraction = float(cfg.get("val_fraction", 0.0) or 0.0)
+        if val_fraction > 0:
+            from miol.data.hidden_states_dataset import split_indices
+            tr_idx, va_idx = split_indices(len(train_dataset), val_fraction, int(cfg.get("val_split_seed", 0)))
+            print_main(f"Validation split: {len(tr_idx)} train / {len(va_idx)} val "
+                       f"(val_fraction={val_fraction}); test split ({len(eval_dataset)}) not used during training")
+            eval_dataset = train_dataset.subset(va_idx)
+            train_dataset = train_dataset.subset(tr_idx)
 
     print_main(f"Train dataset size: {len(train_dataset)}")
     print_main(f"Eval dataset size: {len(eval_dataset)}")
@@ -656,6 +667,17 @@ def _main_impl(cfg: DictConfig):
     mae_callback = MAEPerBinCallback(log_every_n_steps=mae_log_every)
     callbacks.append(mae_callback)
 
+    es_cfg = cfg.get("early_stopping", None)
+    plateau_controller = None
+    if (not streaming) and es_cfg is not None and bool(es_cfg.get("enabled", False)):
+        from miol.model.callback import ValPlateauController
+        plateau_controller = ValPlateauController(
+            patience=int(es_cfg.get("patience", 5)),
+            min_delta=float(es_cfg.get("min_delta", 0.25)),
+            stop=True,
+        )
+        callbacks.append(plateau_controller)
+
     if display_callback_enabled:
         display_callback = ExampleDisplayCallback2(
             base_model=base_model,
@@ -707,6 +729,8 @@ def _main_impl(cfg: DictConfig):
 
     # Link callback to trainer
     mae_callback.trainer = trainer
+    if plateau_controller is not None:
+        plateau_controller.trainer = trainer
 
     # Restore probe heads + per-probe optimizer states if resuming.
     # HF Trainer.train(resume_from_checkpoint=...) handles its own state

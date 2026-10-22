@@ -178,6 +178,13 @@ class MultiProbeOfflineTrainer(CustomTrainer):
         # variants (e.g. "count_L0", "percentage_L0").
         self._canonical_count_name = canonical_count_name
         self._canonical_percentage_name = canonical_percentage_name
+        # Validation absolute-error accumulators for every count-style head:
+        # {probe_name: [sum_abs_err, n_tokens]}. Filled in prediction_step on
+        # every rank, all-reduced and consumed by ValPlateauController.
+        self._val_ae = {}
+        # LR schedulers for the non-canonical count heads (the HF Trainer only
+        # steps the canonical head's scheduler); stepped by ValPlateauController.
+        self._extra_schedulers = {}
         # Streaming mode: generate completions and extract hidden states inside
         # training_step / prediction_step instead of reading them from a
         # HiddenStatesDataset on disk. The base model is required and stays
@@ -697,6 +704,38 @@ class MultiProbeOfflineTrainer(CustomTrainer):
                     by_count[bucket] = (error, 1)
                     by_count_sq[bucket] = (sq_error, 1)
 
+    def _accumulate_val_ae(self, name, preds, targets):
+        """Add |pred - target| over unmasked tokens (target != -100) for head `name`."""
+        p = preds.reshape(-1).float()
+        t = targets.reshape(-1)
+        m = t != -100
+        acc = self._val_ae.setdefault(name, [0.0, 0])
+        if bool(m.any()):
+            acc[0] += float((p[m] - t[m].float()).abs().sum().item())
+            acc[1] += int(m.sum().item())
+
+    def consume_val_mae(self):
+        """Return {head_name: validation MAE (token-level, pooled over all ranks)}
+        accumulated since the last call, then reset. Must be called on every rank
+        the same number of times (all-reduce)."""
+        import torch.distributed as dist
+        names = sorted(self._count_probe_names)
+        vals = torch.zeros(len(names), 2, dtype=torch.float64)
+        for i, n in enumerate(names):
+            if n in self._val_ae:
+                vals[i, 0], vals[i, 1] = self._val_ae[n][0], self._val_ae[n][1]
+        if dist.is_available() and dist.is_initialized():
+            dev = torch.device("cuda", torch.cuda.current_device()) if dist.get_backend() == "nccl" else vals.device
+            vals = vals.to(dev)
+            dist.all_reduce(vals)
+            vals = vals.cpu()
+        self._val_ae = {}
+        out = {}
+        for i, n in enumerate(names):
+            if vals[i, 1] > 0:
+                out[n] = float(vals[i, 0] / vals[i, 1])
+        return out
+
     def create_optimizer(self):
         """Override to prevent Trainer from creating its own optimizer.
 
@@ -711,6 +750,14 @@ class MultiProbeOfflineTrainer(CustomTrainer):
         if self.scheduler_factory is not None:
             # Apply scheduler to each probe optimizer
             self.lr_scheduler = self.scheduler_factory(self.optimizer)
+            # HF only steps `self.lr_scheduler` (canonical count head). Give every
+            # other count-style head its own scheduler so it decays on its OWN
+            # validation MAE instead of staying at the initial LR all run.
+            self._extra_schedulers = {
+                name: self.scheduler_factory(self.probe_optimizers[name])
+                for name in self._count_probe_names
+                if name != self._canonical_count_name and name in self.probe_optimizers
+            }
         else:
             super().create_scheduler(num_training_steps, optimizer)
 
@@ -1258,6 +1305,12 @@ class MultiProbeOfflineTrainer(CustomTrainer):
                 # Log per-probe eval loss
                 self._probe_loss_sums[name] += loss.item()
                 self._probe_loss_counts[name] += 1
+
+                # Validation MAE of every count-style head (all ranks; the
+                # controller all-reduces). Drives per-head LR decay, early
+                # stopping and best-head restoration.
+                if name in self._count_probe_names:
+                    self._accumulate_val_ae(name, logits.squeeze(-1), inputs["remaining_token_counts"])
 
                 # Accumulate per-bin classification metrics for eval
                 if spec["type"] == "classification" and is_main_process():

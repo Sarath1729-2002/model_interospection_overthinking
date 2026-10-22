@@ -2,13 +2,31 @@
 Dataset class for loading pre-extracted hidden states for offline probe training.
 """
 
+import copy
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Sequence
 
+import numpy as np
 import torch
 from safetensors.torch import load_file
 from torch.utils.data import Dataset
+
+
+def split_indices(n: int, val_fraction: float, split_seed: int = 0):
+    """Deterministic train/validation split of `n` samples.
+
+    The split depends only on (n, val_fraction, split_seed) - NOT on the
+    training seed - so every probe seed and the ridge cross-check see the same
+    validation samples. Returns (train_idx, val_idx) as sorted int lists.
+    """
+    if not 0.0 < val_fraction < 1.0:
+        raise ValueError(f"val_fraction must be in (0, 1); got {val_fraction}")
+    n_val = min(max(1, int(round(n * val_fraction))), n - 1)
+    perm = np.random.RandomState(int(split_seed)).permutation(n)
+    val = sorted(int(i) for i in perm[:n_val])
+    train = sorted(int(i) for i in perm[n_val:])
+    return train, val
 
 
 class HiddenStatesDataset(Dataset):
@@ -66,6 +84,12 @@ class HiddenStatesDataset(Dataset):
 
     def __len__(self):
         return len(self.sample_files)
+
+    def subset(self, indices: Sequence[int]) -> "HiddenStatesDataset":
+        """Shallow copy restricted to `indices` (same loading mode, no I/O)."""
+        new = copy.copy(self)
+        new.sample_files = [self.sample_files[int(i)] for i in indices]
+        return new
 
     def __getitem__(self, idx):
         """Load and return a sample with hidden states."""

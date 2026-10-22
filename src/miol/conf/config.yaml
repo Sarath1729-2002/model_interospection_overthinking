@@ -46,6 +46,17 @@ output_dir: ./outputs # Output directory for model checkpoints
 # and wandb.run_name from the current invocation can override the saved snapshot.
 resume_from: ""
 
+# Validation split + early stopping (offline training only).
+# val_fraction > 0 holds that fraction of TRAIN out as the validation set used for
+# LR decay, early stopping and best-head selection; the test split is then only
+# used by evaluate_probes.py. val_fraction: 0 = old behaviour (test split drives them).
+val_fraction: 0.0
+val_split_seed: 0 # independent of `seed`, so all seeds share one validation set
+early_stopping:
+  enabled: false
+  patience: 5 # evals without improvement before stopping
+  min_delta: 0.25 # minimum MAE improvement (tokens) that counts
+
 # Evaluation
 eval_strategy: steps # Evaluate every N steps
 eval_steps: 10

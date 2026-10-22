@@ -10,18 +10,22 @@ source cluster/config.sh
 [[ -z "$SBATCH_ACCOUNT" ]] && { echo "Set SBATCH_ACCOUNT in cluster/config.sh"; exit 1; }
 export LAYER_SWEEP="${LAYER_SWEEP:-1}"     # 1 = per-layer sweep too (default); LAYER_SWEEP=0 skips it
 
-COMMON=(--parsable --account="$SBATCH_ACCOUNT" --export=ALL)
+COMMON=(--parsable --account="$SBATCH_ACCOUNT" --export=ALL --gpus-per-node="$GPUS_PER_NODE" --mem="$MEM")
 [[ -n "$SLACK_EMAIL" ]] && COMMON+=(--mail-user="$SLACK_EMAIL" --mail-type=BEGIN,END,FAIL,TIME_LIMIT_80)
-if [[ "$SMOKE" == "1" ]]; then T_EXTRACT=00:40:00 T_SEED=01:30:00 T_FINAL=00:30:00
-else T_EXTRACT=04:00:00 T_SEED=12:00:00 T_FINAL=02:00:00; fi
+if [[ "$SMOKE" == "1" ]]; then T_EXTRACT=00:40:00 T_SEED=01:30:00 T_FINAL=00:30:00 T_RIDGE=00:20:00
+else T_EXTRACT=04:00:00 T_SEED=12:00:00 T_FINAL=02:00:00 T_RIDGE=02:00:00; fi
 
 prev=$(STAGE=extract sbatch "${COMMON[@]}" --job-name=mop-extract --time="$T_EXTRACT" cluster/run.sbatch)
 msg="extract=$prev"
+if [[ "$RIDGE" == "1" ]]; then   # independent of the seeds: starts as soon as extraction is done
+  ridge=$(STAGE=ridge sbatch "${COMMON[@]}" --gpus-per-node="$FINAL_GPUS" --job-name=mop-ridge --time="$T_RIDGE" --dependency=afterok:"$prev" cluster/run.sbatch)
+  msg="$msg ridge=$ridge"
+fi
 for seed in $SEEDS; do
   prev=$(STAGE=seed SEED="$seed" sbatch "${COMMON[@]}" --job-name="mop-seed$seed" --time="$T_SEED" --dependency=afterok:"$prev" cluster/run.sbatch)
   msg="$msg seed$seed=$prev"
 done
-final=$(STAGE=final sbatch "${COMMON[@]}" --job-name=mop-final --time="$T_FINAL" --dependency=afterok:"$prev" --gpus-per-node=1 --cpus-per-task=8 cluster/run.sbatch)
+final=$(STAGE=final sbatch "${COMMON[@]}" --job-name=mop-final --time="$T_FINAL" --dependency=afterok:"$prev" --gpus-per-node="$FINAL_GPUS" --cpus-per-task=8 cluster/run.sbatch)
 msg="$msg final=$final"
 echo "submitted: $msg   (watch: squeue -u \$USER)"
 notify "pipeline SUBMITTED" "$msg"

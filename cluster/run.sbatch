@@ -1,8 +1,9 @@
 #!/bin/bash
-# One job script. STAGE=extract | seed | final   (cluster/submit.sh chains them; you rarely call this by hand)
+# One job script. STAGE=extract | seed | final | ridge   (cluster/submit.sh chains them; you rarely call this by hand)
 #   extract : generate answers + cache hidden states (all GPUs)
 #   seed    : for ONE seed (SEED=n): train -> evaluate -> [Slack report] -> layer sweep -> [Slack report]
 #   final   : combine all seeds -> final summary + layer curve with seed error bars
+#   ridge   : closed-form ridge per layer (validation-tuned) vs the trained probes - optimisation check
 # Parallel: torchrun, 1 rank per GPU.
 #SBATCH --job-name=mop
 #SBATCH --nodes=1
@@ -33,6 +34,8 @@ train_probes() {  # train_probes <run_name_suffix> <extra hydra args...>   (uses
     seed="$SEED" max_steps="$MAX_STEPS" unified_batch_size="$TRAIN_BS" \
     eval_steps="$EVAL_STEPS" display_every_n_steps=0 \
     scheduler.scheduler_factory.patience="$SCHED_PATIENCE" \
+    val_fraction="$VAL_FRACTION" early_stopping.enabled=$([[ "$ES_ENABLED" == "1" ]] && echo true || echo false) \
+    early_stopping.patience="$ES_PATIENCE" early_stopping.min_delta="$ES_MIN_DELTA" \
     dataloader.num_workers="$WORKERS" dataloader.prefetch_factor=2 "$@"
 }
 
@@ -45,7 +48,7 @@ sweep_eval() {  # sweep_eval <out_dir> <seed...>
     --output-dir "$out" --num-workers "$WORKERS" | tee "$out/summary.txt"
 }
 
-case "${STAGE:?set STAGE=extract|seed|final}" in
+case "${STAGE:?set STAGE=extract|seed|final|ridge}" in
 extract)
   notify "extraction STARTED" "$(nvidia-smi -L | wc -l) GPUs; max_new_tokens=$MAX_NEW_TOKENS; smoke=$SMOKE"
   launch src/miol/extract_hidden_states.py \
@@ -87,6 +90,11 @@ $(cat "$RUN_DIR/layer_sweep/summary.txt")"
     body="$(cat "$RUN_DIR/summary.txt")"
   fi
   notify "ALL SEEDS DONE - final results (seeds: $SEEDS)" "$body"
+  ;;
+ridge)
+  notify "ridge check STARTED (layers: $RIDGE_LAYERS)"
+  python cluster/ridge_check.py --run-dir "$RUN_DIR" --layers "$RIDGE_LAYERS" --val-fraction "$VAL_FRACTION" --workers 16
+  notify "ridge check DONE in $(elapsed)" "$(cat "$RUN_DIR/ridge_check/summary.txt")"
   ;;
 *) echo "unknown STAGE=$STAGE"; exit 2 ;;
 esac

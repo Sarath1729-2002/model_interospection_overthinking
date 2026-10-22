@@ -57,7 +57,15 @@ W&B ran offline; upload from the login node: `wandb sync $SCRATCH/model_overthin
 * **Disk**: estimate ~0.6 TB for the full GSM8K cache (unverified; the audit prints real token counts). Check `diskusage_report`
   before launching; scratch is purged after ~60 days of inactivity.
 * **Settings I chose** (all in `cluster/config.sh`): `MAX_NEW_TOKENS=1024` (repo default 300 would truncate GSM8K answers),
-  `repetition_penalty=1.0` (Qwen's checkpoint ships 1.05), `EVAL_STEPS=50/PATIENCE=0` (repo 10/5 is ~5x costlier I/O),
-  3 seeds. Exact repo cadence: `EVAL_STEPS=10 SCHED_PATIENCE=5 bash cluster/submit.sh`.
-* **GPU type**: add e.g. `--gpus-per-node=h100:4` by editing `COMMON=` in `cluster/submit.sh` if you need a specific GPU.
+  `repetition_penalty=1.0` (Qwen's checkpoint ships 1.05), `EVAL_STEPS=100` (each eval re-reads the validation samples from disk),
+  3 seeds. Exact repo cadence: `EVAL_STEPS=10 SCHED_PATIENCE=5 ES_ENABLED=0 VAL_FRACTION=0 bash cluster/submit.sh`.
+* **Validation split + early stopping**: `VAL_FRACTION=0.05` of TRAIN is held out (same samples for every seed). The LR schedule,
+  early stopping (`ES_PATIENCE=5` evals without `ES_MIN_DELTA=0.25` tokens of improvement) and best-step selection use only that
+  split; each count head is restored to its own best validation step; the test split is scored once, by `evaluate_probes.py`.
+  `MAX_STEPS` is now only a cap. `early_stopping.json` in each `trained_probe/` folder records the best/stop steps.
+  Every count head (not just the first) now decays its own learning rate on its own validation MAE.
+* **Ridge cross-check** (`RIDGE=1`, own job `mop-ridge`, starts after extraction): closed-form ridge per layer, strength picked on the
+  validation split, test MAE with 95% CI next to constant/position baselines -> `$RUN_DIR/ridge_check/summary.txt`. If ridge is clearly
+  below the trained probe at the same layer, the trained probe is optimisation-limited. When re-submitting only extra seeds use `RIDGE=0`.
+* **GPUs/memory**: `GPUS_PER_NODE` (default `h100:4`, TamIA gives whole nodes), `MEM` (default `0`; Fir: `MEM=240G`), `FINAL_GPUS` for the light jobs.
 * Not tested on a real cluster or with the real Qwen weights (this was built where those were unreachable); the rehearsal is the test.

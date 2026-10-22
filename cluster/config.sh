@@ -17,10 +17,23 @@ export SEEDS="${SEEDS:-0 1 2}"                            # probe seeds (paper: 
 export MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-1024}"           # repo default 300 would truncate GSM8K answers
 export GEN_BATCH="${GEN_BATCH:-32}"                       # prompts per generate() call, per GPU
 export FWD_BATCH="${FWD_BATCH:-16}"                       # sequences per hidden-state forward, per GPU
-export MAX_STEPS="${MAX_STEPS:-4000}"
+export MAX_STEPS="${MAX_STEPS:-4000}"                     # hard cap; early stopping usually ends the run sooner
 export TRAIN_BS="${TRAIN_BS:-8}"                          # per GPU
-export EVAL_STEPS="${EVAL_STEPS:-50}"                     # repo default 10/5 re-reads ~100GB eval data 400x
-export SCHED_PATIENCE="${SCHED_PATIENCE:-0}"
+export EVAL_STEPS="${EVAL_STEPS:-100}"                    # each eval re-reads the validation samples from disk
+export SCHED_PATIENCE="${SCHED_PATIENCE:-1}"              # evals without improvement before the LR halves
+# Validation split + early stopping: hold VAL_FRACTION of TRAIN out (same split for every seed); the LR
+# schedule, early stopping and best-step selection use ONLY that split, the test split is scored once at the end.
+export VAL_FRACTION="${VAL_FRACTION:-0.05}"
+export ES_ENABLED="${ES_ENABLED:-1}"                      # 0 = train for exactly MAX_STEPS
+export ES_PATIENCE="${ES_PATIENCE:-5}"                    # evals without >ES_MIN_DELTA improvement before stopping
+export ES_MIN_DELTA="${ES_MIN_DELTA:-0.25}"               # tokens of MAE
+# Ridge cross-check (does a closed-form fit beat the trained probe? -> is the probe optimisation-limited?)
+export RIDGE="${RIDGE:-1}"
+export RIDGE_LAYERS="${RIDGE_LAYERS:-8,12,16,20,24,26,27,28}"   # or "all"
+# Slurm resources (TamIA hands out H100s by whole node: 4 per node). On Fir use e.g. GPUS_PER_NODE=h100:4 MEM=240G
+export GPUS_PER_NODE="${GPUS_PER_NODE:-h100:4}"
+export MEM="${MEM:-0}"
+export FINAL_GPUS="${FINAL_GPUS:-$GPUS_PER_NODE}"         # for the light jobs (final summary, ridge); use h100:1 where partial nodes are allowed
 export WORKERS="${WORKERS:-6}"                            # dataloader workers per GPU
 
 # SMOKE=1 -> tiny rehearsal (64 train / 32 eval prompts, 40 train steps) in its own folder.
@@ -28,7 +41,7 @@ export SMOKE="${SMOKE:-0}"
 export RUN_NAME="${RUN_NAME:-${MODEL}-${DATA}}"
 SMOKE_ARGS=""
 if [[ "$SMOKE" == "1" ]]; then
-  RUN_NAME="${RUN_NAME}-smoke"; SMOKE_ARGS="data.num_train_samples=64 data.num_eval_samples=32"
+  [[ "$RUN_NAME" == *-smoke ]] || RUN_NAME="${RUN_NAME}-smoke"; SMOKE_ARGS="data.num_train_samples=64 data.num_eval_samples=32"
   MAX_STEPS=40; EVAL_STEPS=20; SEEDS="0"
 fi
 export RUN_NAME MAX_STEPS EVAL_STEPS SEEDS SMOKE_ARGS
@@ -85,8 +98,9 @@ launch() {
   gpus="$(nvidia-smi -L | wc -l)"
   head="$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)"
   port=$((20000 + SLURM_JOB_ID % 20000))
+  if [[ "${SLURM_NNODES:-1}" == "1" ]]; then RDZV_ARGS="--standalone"; else RDZV_ARGS="--rdzv_backend=c10d --rdzv_endpoint=$head:$port --rdzv_id=$SLURM_JOB_ID"; fi
   export OMP_NUM_THREADS=$(( ${SLURM_CPUS_PER_TASK:-8} / gpus > 0 ? ${SLURM_CPUS_PER_TASK:-8} / gpus : 1 ))
   srun --ntasks-per-node=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-8}" --kill-on-bad-exit=1 \
     python -m torch.distributed.run --nnodes="$SLURM_NNODES" --nproc_per_node="$gpus" \
-      --rdzv_backend=c10d --rdzv_endpoint="$head:$port" --rdzv_id="$SLURM_JOB_ID" "$@"
+      $RDZV_ARGS "$@"
 }
