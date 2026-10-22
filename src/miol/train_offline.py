@@ -43,7 +43,7 @@ from pathlib import Path
 import torch
 import wandb
 import hydra
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 from hydra.utils import instantiate
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, set_seed
 
@@ -361,6 +361,14 @@ def _main_impl(cfg: DictConfig):
     # `seed` arg seeds dataloader shuffling and dropout init separately.
     seed = int(cfg.get("seed", 0))
     set_seed(seed)
+
+    # The per-layer sweep trains ~29x more (small) heads in one run and early stopping can keep
+    # creeping for thousands of steps, so give it its own step cap (0 = no separate cap).
+    sweep_cap = int(cfg.get("sweep_max_steps", 0) or 0)
+    if sweep_cap > 0 and "data" in cfg and cfg.data.get("layers_to_train", None) and int(cfg.max_steps) > sweep_cap:
+        with open_dict(cfg):
+            cfg.max_steps = sweep_cap
+        print_main(f"[sweep] layers_to_train set: max_steps capped at sweep_max_steps={sweep_cap}")
 
     # Print config
     if is_main_process():
