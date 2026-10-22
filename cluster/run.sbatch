@@ -21,7 +21,7 @@ cd "$SLURM_SUBMIT_DIR"
 mkdir -p "$RUN_DIR"
 LAYER_SWEEP="${LAYER_SWEEP:-1}"
 T0=$SECONDS
-trap 'notify "FAILED: stage=${STAGE} ${SEED:+seed=$SEED }(line $LINENO)" "$(tail -n 25 "${SLURM_SUBMIT_DIR}/mop-${SLURM_JOB_ID}.out" 2>/dev/null)"' ERR
+trap 'notify "FAILED: stage=${STAGE} ${SEED:+seed=$SEED }(line $LINENO)" "$(tail -n 25 "${SLURM_SUBMIT_DIR}/${SLURM_JOB_NAME}-${SLURM_JOB_ID}.out" 2>/dev/null)"' ERR
 elapsed() { printf '%dh%02dm' $(((SECONDS - T0) / 3600)) $((((SECONDS - T0) % 3600) / 60)); }
 
 train_probes() {  # train_probes <run_name_suffix> <extra hydra args...>   (uses $SEED)

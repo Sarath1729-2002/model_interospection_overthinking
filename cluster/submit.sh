@@ -15,13 +15,13 @@ COMMON=(--parsable --account="$SBATCH_ACCOUNT" --export=ALL)
 if [[ "$SMOKE" == "1" ]]; then T_EXTRACT=00:40:00 T_SEED=01:30:00 T_FINAL=00:30:00
 else T_EXTRACT=04:00:00 T_SEED=12:00:00 T_FINAL=02:00:00; fi
 
-prev=$(STAGE=extract sbatch "${COMMON[@]}" --time="$T_EXTRACT" cluster/run.sbatch)
+prev=$(STAGE=extract sbatch "${COMMON[@]}" --job-name=mop-extract --time="$T_EXTRACT" cluster/run.sbatch)
 msg="extract=$prev"
 for seed in $SEEDS; do
-  prev=$(STAGE=seed SEED="$seed" sbatch "${COMMON[@]}" --time="$T_SEED" --dependency=afterok:"$prev" cluster/run.sbatch)
+  prev=$(STAGE=seed SEED="$seed" sbatch "${COMMON[@]}" --job-name="mop-seed$seed" --time="$T_SEED" --dependency=afterok:"$prev" cluster/run.sbatch)
   msg="$msg seed$seed=$prev"
 done
-final=$(STAGE=final sbatch "${COMMON[@]}" --time="$T_FINAL" --dependency=afterok:"$prev" --gpus-per-node=1 --cpus-per-task=8 cluster/run.sbatch)
+final=$(STAGE=final sbatch "${COMMON[@]}" --job-name=mop-final --time="$T_FINAL" --dependency=afterok:"$prev" --gpus-per-node=1 --cpus-per-task=8 cluster/run.sbatch)
 msg="$msg final=$final"
 echo "submitted: $msg   (watch: squeue -u \$USER)"
 notify "pipeline SUBMITTED" "$msg"

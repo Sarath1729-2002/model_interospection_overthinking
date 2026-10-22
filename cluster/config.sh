@@ -3,8 +3,8 @@
 # Override any of them on the command line, e.g.  SEEDS="0" bash cluster/submit.sh
 
 # ---- fill these in ----------------------------------------------------------
-# Slack: the e-mail address of the Mila Slack channel (or DM) that should get the reports.
-# Slack channel -> "Integrations" -> "Send emails to this channel" gives you the address.
+# Slack/phone reports: set SLACK_WEBHOOK_URL and/or NTFY_TOPIC in ~/.bashrc (see notify() below).
+# SLACK_EMAIL (your Slackbot forwarding address) receives Slurm's own BEGIN/END/FAIL mails for every job.
 export SLACK_EMAIL="${SLACK_EMAIL:-}"
 # Your allocation, e.g. def-oberman (see: sacctmgr show assoc user=$USER format=account%30)
 export SBATCH_ACCOUNT="${SBATCH_ACCOUNT:-}"
@@ -44,24 +44,38 @@ export RUN_DIR="$ROOT/outputs/$RUN_NAME"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}" TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export WANDB_MODE="${WANDB_MODE:-offline}" TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
 
-# Slack message by e-mail. Never fails the job; always prints the subject to the log.
-# Tries, in order: sendmail, mail, then Python smtplib to the node's local mail server (port 25).
+# Stage reports. Never fails the job; always prints the subject to the log.
+# Channels used if configured (put the secrets in ~/.bashrc as `export ...`, never in the repo):
+#   SLACK_WEBHOOK_URL  Slack incoming webhook posting to your DM   (works from Fir/Nibi compute nodes: they have internet)
+#   NTFY_TOPIC         private topic name for push notifications via ntfy.sh (phone app)
+# If neither is set it falls back to e-mail to SLACK_EMAIL (sendmail, mail, local SMTP) - not available on Fir nodes.
 # usage: notify "subject" ["body"]
 notify() {
-  local subject="[mop ${RUN_NAME}] $1" body="${2:-}" sm msg
+  local subject="[mop ${RUN_NAME}] $1" body="${2:-}" text sent=0 sm msg
   echo "[notify] $subject"
-  [[ -z "$SLACK_EMAIL" ]] && return 0
-  msg="$(printf 'To: %s\nFrom: %s@%s\nSubject: %s\n\n%s\n\nhost=%s job=%s\n' \
-         "$SLACK_EMAIL" "${USER:-mop}" "$(hostname -f 2>/dev/null || hostname)" "$subject" "$body" "$(hostname)" "${SLURM_JOB_ID:-login}")"
+  text="*${subject}*"$'\n'"${body}"$'\n'"host=$(hostname) job=${SLURM_JOB_ID:-login}"
+  if [[ -n "${SLACK_WEBHOOK_URL:-}" ]]; then
+    if printf '%s' "${text:0:30000}" | python3 -c 'import json,sys; print(json.dumps({"text": sys.stdin.read()}))' \
+         | curl -sS --fail -m 20 -X POST -H 'Content-type: application/json' --data @- "$SLACK_WEBHOOK_URL" >/dev/null 2>&1; then
+      sent=1
+    else echo "[notify] Slack webhook post failed"; fi
+  fi
+  if [[ -n "${NTFY_TOPIC:-}" ]]; then
+    if curl -sS --fail -m 20 -H "Title: ${subject}" -d "${text:0:3500}" "${NTFY_SERVER:-https://ntfy.sh}/${NTFY_TOPIC}" >/dev/null 2>&1; then
+      sent=1
+    else echo "[notify] ntfy post failed"; fi
+  fi
+  [[ $sent == 1 || -z "${SLACK_EMAIL:-}" ]] && return 0
+  msg="$(printf 'To: %s\nFrom: %s@%s\nSubject: %s\n\n%s\n' "$SLACK_EMAIL" "${USER:-mop}" "$(hostname)" "$subject" "$text")"
   sm="$(command -v sendmail 2>/dev/null || ls /usr/sbin/sendmail /usr/lib/sendmail 2>/dev/null | head -n1 || true)"
   if [[ -n "$sm" ]] && printf '%s\n' "$msg" | "$sm" -t 2>/dev/null; then return 0; fi
-  if command -v mail >/dev/null 2>&1 && printf '%s\n' "$body" | mail -s "$subject" "$SLACK_EMAIL" 2>/dev/null; then return 0; fi
+  if command -v mail >/dev/null 2>&1 && printf '%s\n' "$text" | mail -s "$subject" "$SLACK_EMAIL" 2>/dev/null; then return 0; fi
   if printf '%s\n' "$msg" | python3 -c 'import smtplib,sys
 from email import message_from_string
 m = message_from_string(sys.stdin.read())
 with smtplib.SMTP("localhost", 25, timeout=20) as s:
     s.send_message(m)' 2>/dev/null; then return 0; fi
-  echo "[notify] could not send e-mail from $(hostname) (no sendmail/mail/local SMTP); message is only in this log"
+  echo "[notify] could not deliver the message anywhere; it is only in this log"
   return 0
 }
 

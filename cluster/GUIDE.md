@@ -34,8 +34,8 @@ SMOKE=1 bash cluster/submit.sh      # 64 train / 32 eval prompts, 40 steps - che
 bash cluster/submit.sh              # the full run: extract -> seed 0 -> seed 1 -> seed 2 -> final combine (seed 0 results reach Slack before seeds 1-2 start)
 LAYER_SWEEP=0 bash cluster/submit.sh   # same without the layer sweep
 ```
-`submit.sh` prints three job ids. Watch with `squeue -u $USER`; logs are `mop-<jobid>.out` in the repo folder
-(`tail -f mop-<jobid>.out`). If a job dies or times out, fix/extend and run `submit.sh` again: extraction resumes
+`submit.sh` prints three job ids. Watch with `squeue -u $USER`; logs are `mop-<stage>-<jobid>.out (`ls mop-*`)` in the repo folder
+(`tail -f mop-<stage>-<jobid>.out (`ls mop-*`)`). If a job dies or times out, fix/extend and run `submit.sh` again: extraction resumes
 where it stopped (finished samples are skipped).
 
 In the rehearsal's extraction log, look at `samples/s` and `generated tokens/s` per rank and extrapolate the full time.
