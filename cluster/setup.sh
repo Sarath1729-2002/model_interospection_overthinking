@@ -7,12 +7,13 @@ source cluster/config.sh
 export HF_HUB_OFFLINE=0 HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0   # download needs the network
 
 module purge 2>/dev/null || true
-module load StdEnv/2023 python/3.12 2>/dev/null || echo "[warn] no python/3.12 module, using $(python3 --version)"
+module load StdEnv/2023 gcc arrow python/3.12 2>/dev/null || echo "[warn] module load failed (StdEnv/2023 gcc arrow python/3.12) - run: module spider arrow python"
 mkdir -p "$ROOT/outputs" "$HF_HOME" "$WANDB_DIR" "$(dirname "$VENV")"
 [[ -d "$VENV" ]] || python3 -m venv "$VENV"
 source "$VENV/bin/activate"
 pip install --upgrade pip
 pip install --no-index "torch>=2.9.0" 2>/dev/null || pip install "torch>=2.9.0"   # cluster wheel first
+# pyarrow comes from the cluster's "arrow" module (loaded above); the plain wheel is a stub that fails to build
 pip install -e .
 ln -sfn "$ROOT/outputs" outputs
 

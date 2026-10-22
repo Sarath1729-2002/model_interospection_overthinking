@@ -44,16 +44,25 @@ export RUN_DIR="$ROOT/outputs/$RUN_NAME"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}" TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export WANDB_MODE="${WANDB_MODE:-offline}" TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1
 
-# Slack message by e-mail. Never fails the job; prints to the log if mail is unavailable.
+# Slack message by e-mail. Never fails the job; always prints the subject to the log.
+# Tries, in order: sendmail, mail, then Python smtplib to the node's local mail server (port 25).
 # usage: notify "subject" ["body"]
 notify() {
-  local subject="[mop ${RUN_NAME}] $1" body="${2:-}"
+  local subject="[mop ${RUN_NAME}] $1" body="${2:-}" sm msg
   echo "[notify] $subject"
   [[ -z "$SLACK_EMAIL" ]] && return 0
-  { printf '%s\n\nhost=%s job=%s\n' "$body" "$(hostname)" "${SLURM_JOB_ID:-login}"; } \
-    | { mail -s "$subject" "$SLACK_EMAIL" 2>/dev/null \
-        || mailx -s "$subject" "$SLACK_EMAIL" 2>/dev/null \
-        || echo "[notify] no working 'mail' command; message only in log"; } || true
+  msg="$(printf 'To: %s\nFrom: %s@%s\nSubject: %s\n\n%s\n\nhost=%s job=%s\n' \
+         "$SLACK_EMAIL" "${USER:-mop}" "$(hostname -f 2>/dev/null || hostname)" "$subject" "$body" "$(hostname)" "${SLURM_JOB_ID:-login}")"
+  sm="$(command -v sendmail 2>/dev/null || ls /usr/sbin/sendmail /usr/lib/sendmail 2>/dev/null | head -n1 || true)"
+  if [[ -n "$sm" ]] && printf '%s\n' "$msg" | "$sm" -t 2>/dev/null; then return 0; fi
+  if command -v mail >/dev/null 2>&1 && printf '%s\n' "$body" | mail -s "$subject" "$SLACK_EMAIL" 2>/dev/null; then return 0; fi
+  if printf '%s\n' "$msg" | python3 -c 'import smtplib,sys
+from email import message_from_string
+m = message_from_string(sys.stdin.read())
+with smtplib.SMTP("localhost", 25, timeout=20) as s:
+    s.send_message(m)' 2>/dev/null; then return 0; fi
+  echo "[notify] could not send e-mail from $(hostname) (no sendmail/mail/local SMTP); message is only in this log"
+  return 0
 }
 
 # torchrun on every GPU of every allocated node (1 srun task per node)

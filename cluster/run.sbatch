@@ -15,7 +15,7 @@
 set -euo pipefail
 source "${SLURM_SUBMIT_DIR}/cluster/config.sh"
 module purge 2>/dev/null || true
-module load StdEnv/2023 python/3.12 2>/dev/null || true
+module load StdEnv/2023 gcc arrow python/3.12 2>/dev/null || true
 source "$VENV/bin/activate"
 cd "$SLURM_SUBMIT_DIR"
 mkdir -p "$RUN_DIR"
