@@ -13,7 +13,10 @@ from miol.signals.metrics import (auroc, boot_auroc, boot_paired, boot_reg, boot
                                   within_group_spearman)
 from miol.signals.targets import build_targets
 
-KEY = ["a", "f", "g", "rem", "d_gold", "d_commit", "fg", "ff", "r_pgold", "r_pfinal", "r_H"]
+KEY = ["a", "f", "g", "rem", "d_gold", "d_commit", "fg", "ff", "a_next", "da", "ent1", "ent_next", "surp_next", "hedge_next", "hedge_rem",
+       "flips_rem", "steps_rem", "r_pgold", "r_pfinal", "r_H"]
+BINARY = ["loss_next", "gain_next", "loss_end", "y_end", "fg", "ff"]
+RIVALS = ["B1", "B3_mlp", "B4", "B5", "B5_mlp"]          # the baselines a probe is compared with, when they exist
 LOG_HALF = float(np.log(0.5))
 
 
@@ -112,7 +115,7 @@ def compare_table(D: Data, B: int = 400) -> pd.DataFrame:
         for pm, tag in probes:
             pp = D.p(pm, t)[ok]
             est = boot_reg(y, pp, grp, B)
-            for bm in ("B0", "B1", "B3_mlp", "B4"):
+            for bm in ["B0"] + RIVALS:
                 if bm not in D.models:
                     continue
                 d = boot_paired(y, pp, D.p(bm, t)[ok], grp, B)
@@ -131,7 +134,7 @@ def within_trace(D: Data, B: int = 300) -> pd.DataFrame:
         ok = D.ok(t)
         pm = "ALL" if "ALL" in D.models else best_layer(D, t)
         va, ca = within_group_spearman(D.y(t)[ok], D.p(pm, t)[ok], g[ok])
-        for bm in ("B1", "B4"):
+        for bm in [b for b in ("B1", "B4", "B5") if b in D.models]:
             vb, cb = within_group_spearman(D.y(t)[ok], D.p(bm, t)[ok], g[ok])
             d = boot_within(ca, cb, B)
             rows.append({"target": t, "probe": pm, "within-trace Spearman probe": va, "baseline": bm,
@@ -157,7 +160,7 @@ def before_text(D: Data, B: int = 200) -> pd.DataFrame:
         lab = ya[m] > LOG_HALF
         if lab.sum() < 5 or (~lab).sum() < 5:
             continue
-        for bm in ("B1", "B4"):
+        for bm in [b for b in ("B1", "B4", "B5") if b in D.models]:
             d = boot_auroc(lab, D.p(pm, "a")[m], g[m], B, s2=D.p(bm, "a")[m])
             rows.append({"subset": name, "n rows": int(m.sum()), "label": "model already puts >50% on gold (a > log .5)",
                          "positive rate": float(lab.mean()), "AUROC probe": auroc(lab, D.p(pm, "a")[m]),
@@ -166,7 +169,7 @@ def before_text(D: Data, B: int = 200) -> pd.DataFrame:
         yf = D.y("ff")
         m = (df["final_in"].values == 0) & (df["k"].values >= 1) & np.isfinite(yf)
         if m.sum() >= 50 and 5 <= yf[m].sum() <= m.sum() - 5:
-            for bm in ("B1", "B4"):
+            for bm in [b for b in ("B1", "B4", "B5") if b in D.models]:
                 d = boot_auroc(yf[m] > 0.5, D.p(pm, "f")[m], g[m], B, s2=D.p(bm, "f")[m])
                 rows.append({"subset": "own final answer not yet written (k>=1)", "n rows": int(m.sum()),
                              "label": "forced answer already equals own final answer", "positive rate": float((yf[m] > 0.5).mean()),
@@ -187,7 +190,7 @@ def monitors(D: Data, B: int = 200) -> pd.DataFrame:
         if m.sum() < 50 or lab[m].sum() < 5 or (~lab[m].astype(bool)).sum() < 5:
             return
         sgn = 1.0 if higher_is_positive else -1.0
-        for bm in ("B1", "B4"):
+        for bm in [b for b in ("B1", "B4", "B5") if b in D.models]:
             d = boot_auroc(lab[m].astype(bool), sgn * D.p(pm, t)[m], g[m], B, s2=sgn * D.p(bm, t)[m])
             rows.append({"monitor": name, "score": score_name, "n": int(m.sum()), "positive rate": float(lab[m].mean()),
                          "AUROC probe": auroc(lab[m].astype(bool), sgn * D.p(pm, t)[m]),
@@ -212,6 +215,27 @@ def monitors(D: Data, B: int = 200) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def binary_tasks(D: Data, B: int = 200) -> pd.DataFrame:
+    """0/1 events a monitor would care about, scored as AUROC of the probe's regression output (higher = more likely)."""
+    pm = "ALL" if "ALL" in D.models else (best_layer(D, "a") if D.layers else None)
+    g = D.df["test"]["sample"].values
+    rows = []
+    for t in BINARY:
+        if t not in D.names or pm is None:
+            continue
+        y = D.y(t)
+        m = np.isfinite(y)
+        if m.sum() < 100 or y[m].sum() < 10 or (1 - y[m]).sum() < 10:
+            continue
+        lab = y[m] > 0.5
+        for bm in [b for b in ["B1", "B4", "B5", "B5_mlp"] if b in D.models]:
+            d = boot_auroc(lab, D.p(pm, t)[m], g[m], B, s2=D.p(bm, t)[m])
+            rows.append({"event": t, "n": int(m.sum()), "base rate": float(lab.mean()), "probe": pm,
+                         "AUROC probe": auroc(lab, D.p(pm, t)[m]), "baseline": bm, "AUROC baseline": auroc(lab, D.p(bm, t)[m]),
+                         "diff [95% CI]": ci(d)})
+    return pd.DataFrame(rows)
+
+
 def early_exit(D: Data, thetas=(0.5, 0.7, 0.8, 0.9, 0.95, 0.99)) -> pd.DataFrame:
     """Stop at the first checkpoint whose (predicted) P(gold) >= theta.  Tokens saved vs accuracy of the forced answer there."""
     df = D.df["test"].copy()
@@ -226,8 +250,8 @@ def early_exit(D: Data, thetas=(0.5, 0.7, 0.8, 0.9, 0.95, 0.99)) -> pd.DataFrame
     rows = [{"policy": "never exit (full trace)", "theta": np.nan, "tokens saved": 0.0, "accuracy": full_acc, "d accuracy": 0.0, "exits": 0.0},
             {"policy": "ORACLE: exit at t* (needs the gold answer)", "theta": np.nan, "tokens saved": orc, "accuracy": full_acc,
              "d accuracy": 0.0, "exits": len(cor) / n_tr}]
-    srcs = [("ALL" if "ALL" in D.models else best_layer(D, "a"), "probe"), ("B4", "text baseline"), ("B1", "position baseline"),
-            ("TRUE", "true forced-answer score")]
+    srcs = [("ALL" if "ALL" in D.models else best_layer(D, "a"), "probe"), ("B5" if "B5" in D.models else "B4", "text baseline"),
+            ("B1", "position baseline"), ("TRUE", "true forced-answer score")]
     srcs = [(m, n) for m, n in srcs if m in D.models or m == "TRUE"]
     for th in thetas:
         for m, name in srcs:
@@ -267,7 +291,8 @@ def prevalence(D: Data) -> pd.DataFrame:
     rows = []
     for sp, tr in D.traces.items():
         r = {"split": sp, "traces": len(tr), "accuracy": tr["correct"].mean()}
-        for c in ("cond_overthink", "cond_rationalize", "cond_lost", "cond_dither"):
+        for c in ("cond_overthink", "cond_overthink_core", "cond_rationalize", "cond_rationalize_core", "cond_lost", "cond_wobble",
+                  "cond_dither"):
             if c in tr:
                 r[c[5:]] = tr[c].mean()
         cor = tr[(tr["correct"] == 1) & (tr["slack_gold"] >= 0)]

@@ -11,6 +11,7 @@ would really go on to answer?) and a second probe target.  The 'final' checkpoin
     CUDA_VISIBLE_DEVICES=0 python cluster/sig_rollouts.py --run-dir $RUN_DIR --split eval --shard 0 --nshards 4 --n-traces 600 --m 4
 """
 import argparse
+import json
 import math
 import sys
 import time
@@ -23,6 +24,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from miol.signals import io as sio  # noqa: E402
+from miol.signals.mathdata import parse_final_math  # noqa: E402
 from miol.signals.text_utils import parse_final_answer  # noqa: E402
 
 NAN = float("nan")
@@ -58,6 +60,7 @@ def main(argv=None, tok=None, model=None):
     ap.add_argument("--n-traces", type=int, default=600, help="random subset of traces that get rollouts (0 = all)")
     ap.add_argument("--subset-seed", type=int, default=0)
     ap.add_argument("--m", type=int, default=4, help="continuations per checkpoint")
+    ap.add_argument("--data", default="gsm8k", choices=["gsm8k", "math"], help="math: token ids from ids_<split>.jsonl, MATH answer parser")
     ap.add_argument("--max-new", type=int, default=700)
     ap.add_argument("--rows-per-batch", type=int, default=12, help="checkpoints per generate() call (x m sequences)")
     ap.add_argument("--chunk-samples", type=int, default=20)
@@ -83,6 +86,14 @@ def main(argv=None, tok=None, model=None):
     from miol.signals.scoring import AnswerScorer  # only for the OOM-halving helper
     helper = AnswerScorer.__new__(AnswerScorer)
     split_dir = sio.hs_dir(a.run_dir, a.split)
+    parse = parse_final_math if a.data == "math" else parse_final_answer
+    id_cache = {}
+    if a.data == "math":
+        want = set(mine)
+        for line in open(out / f"ids_{a.split}.jsonl"):
+            r = json.loads(line)
+            if r["sample"] in want:
+                id_cache[r["sample"]] = (r["prompt_ids"], r["completion_ids"])
     t0, n_done = time.time(), 0
     chunks = [mine[i:i + a.chunk_samples] for i in range(0, len(mine), a.chunk_samples)]
     for ci, sids in enumerate(chunks):
@@ -91,11 +102,14 @@ def main(argv=None, tok=None, model=None):
             continue
         rows, work = [], []                      # work: (ctx_ids, prefix_text, sample, k, gold, final)
         for sid in sids:
-            from safetensors import safe_open
-            with safe_open(str(split_dir / f"sample_{sid:06d}.safetensors"), "pt") as f:
-                p_ids, c_ids = f.get_tensor("prompt_ids").tolist(), f.get_tensor("completion_ids").tolist()
+            if a.data == "math":
+                p_ids, c_ids = id_cache[sid]
+            else:
+                from safetensors import safe_open
+                with safe_open(str(split_dir / f"sample_{sid:06d}.safetensors"), "pt") as f:
+                    p_ids, c_ids = f.get_tensor("prompt_ids").tolist(), f.get_tensor("completion_ids").tolist()
             for r in ck[ck["sample"] == sid].itertuples(index=False):
-                fin = r.final if isinstance(r.final, str) and r.final != "" else None
+                fin = str(r.final) if (isinstance(r.final, str) and r.final != "") or (not isinstance(r.final, str) and r.final == r.final) else None
                 if r.kind == "final":                                             # nothing left to write: deterministic
                     rows.append({"sample": sid, "k": r.k, "roll_H": 0.0, "roll_pgold": float(r.correct),
                                  "roll_pfinal": 1.0 if fin is not None else NAN})
@@ -109,7 +123,7 @@ def main(argv=None, tok=None, model=None):
             res = []
             for i, conts in zip(idx, texts):
                 _, pref, sid, k, gold, fin = work[i]
-                ans = [parse_final_answer(pref + c) or "NONE" for c in conts]
+                ans = [parse(pref + c) or "NONE" for c in conts]
                 res.append({"sample": sid, "k": k, "roll_H": entropy(ans),
                             "roll_pgold": float(np.mean([x == gold for x in ans])),
                             "roll_pfinal": float(np.mean([x == fin for x in ans])) if fin is not None else NAN})

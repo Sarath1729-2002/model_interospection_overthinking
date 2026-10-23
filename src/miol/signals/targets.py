@@ -21,6 +21,27 @@ DESCRIPTIONS = {
     "r_pfinal": "fraction of sampled continuations ending on the trace's own final answer (rollouts)",
 }
 CORE = ["a", "f", "g", "rem", "pct", "d_gold", "d_commit", "fg", "ff"]
+# extra targets, used when their column exists (MATH pipeline); column name == target name
+EXT = ["a_next", "da", "loss_next", "gain_next", "loss_end", "y_end", "ent1", "p1max", "ent_next", "surp_next", "ent_rem",
+       "hedge_next", "hedge_rem", "flips_rem", "steps_rem", "len_next"]
+DESCRIPTIONS.update({
+    "a_next": "log P(gold) at the NEXT checkpoint                      (forecast of what the model will know one step later)",
+    "da": "a_next - a                                                 (will the next step help or hurt?)",
+    "loss_next": "holds the gold answer now -> forced answer is wrong next step (0/1; defined only where it holds it now)",
+    "gain_next": "does not hold it now -> forced answer is gold next step    (0/1; defined only where it does not)",
+    "loss_end": "holds the gold answer now -> the trace still ENDS wrong     (0/1; defined only where it holds it now)",
+    "y_end": "the trace ends correct (0/1)                              (answers 'will this go wrong?' at every step)",
+    "ent1": "entropy of the first forced-answer token                   (how undecided the model is if stopped now)",
+    "p1max": "top-1 probability of the first forced-answer token",
+    "ent_next": "mean next-token entropy over the next step               (forecast of its own uncertainty)",
+    "surp_next": "mean surprisal of the tokens of the next step",
+    "ent_rem": "mean next-token entropy over the rest of the trace",
+    "hedge_next": "hedge words (wait/however/check/...) in the next step",
+    "hedge_rem": "hedge words in the rest of the trace",
+    "flips_rem": "number of times the forced answer will still change",
+    "steps_rem": "reasoning steps (blank-line blocks) still to come",
+    "len_next": "tokens in the next step",
+})
 ROLL = {"r_H": "roll_H", "r_pgold": "roll_pgold", "r_pfinal": "roll_pfinal"}
 
 
@@ -40,11 +61,18 @@ def build_targets(df: pd.DataFrame, include_rollouts: bool = True, names=None) -
     ff = df["eq_final"].values.astype(float)
     ff[(df["final"].fillna("").astype(str) == "").values] = np.nan
     cols["ff"] = ff
+    for e in EXT:
+        if e in df.columns:
+            v = df[e].values.astype(float)
+            cols[e] = np.clip(v, CLIP, 0.0) if e == "a_next" else v
     if names is not None:
+        for name in EXT:
+            if name not in cols:
+                cols[name] = np.full(len(df), np.nan)
         for name, col in ROLL.items():
             cols[name] = df[col].values.astype(float) if col in df.columns else np.full(len(df), np.nan)
         return np.stack([cols[n] for n in names], axis=1), list(names)
-    names = list(CORE)
+    names = list(CORE) + [e for e in EXT if e in cols and np.isfinite(cols[e]).sum() > 100]
     if include_rollouts:
         for name, col in ROLL.items():
             if col in df.columns and np.isfinite(df[col].values.astype(float)).sum() > 100:

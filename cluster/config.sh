@@ -119,3 +119,19 @@ launch() {
     python -m torch.distributed.run --nnodes="$SLURM_NNODES" --nproc_per_node="$gpus" \
       $RDZV_ARGS "$@"
 }
+
+# ---- MATH signals experiment (cluster/setup_math.sh, cluster/submit_math.sh) ----------------------------------------
+# Own run folder (DATA=math -> $ROOT/outputs/${MODEL}-math): generation, forced-answer scoring and hidden states are all done in
+# ONE pass by cluster/msig_worker.py, so no cached extraction is needed.  GSM8K run (for the transfer test): $GSM_RUN_DIR/signals.
+export MSIG_TRAIN_N="${MSIG_TRAIN_N:-0}"                  # train problems used (0 = every integer-answer MATH train problem)
+export MSIG_TEST_N="${MSIG_TEST_N:-1000}"                 # held-out problems (0 = all)
+export MSIG_GATE_N="${MSIG_GATE_N:-160}"                  # problems of the quick gate
+export MSIG_MAX_NEW="${MSIG_MAX_NEW:-2048}"               # generation cap (traces that hit it are flagged as truncated)
+export MSIG_CHUNK="${MSIG_CHUNK:-96}"                     # problems per resumable chunk
+export MSIG_ROLLOUTS="${MSIG_ROLLOUTS:-0}"                # 1 = resampled continuations (slow: ~1.5-2.5 h); weak on GSM8K, off by default
+export MSIG_ROLL_EVAL="${MSIG_ROLL_EVAL:-150}"
+export MSIG_ROLL_TRAIN="${MSIG_ROLL_TRAIN:-300}"
+export MSIG_ROLL_M="${MSIG_ROLL_M:-3}"
+export MSIG_ROLL_MAX_NEW="${MSIG_ROLL_MAX_NEW:-1200}"
+export MSIG_STEER_LAYER="${MSIG_STEER_LAYER:-20}"
+export GSM_RUN_DIR="${GSM_RUN_DIR:-$ROOT/outputs/${MODEL}-gsm8k}"

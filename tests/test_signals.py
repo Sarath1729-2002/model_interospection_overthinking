@@ -345,5 +345,5 @@ def test_end_to_end_tiny(tmp_path, tok, tiny_model):
     ct = _load("sig_controls")
     ct.main(["--run-dir", run, "--device", "cpu", "--val-fraction", "0.2", "--layers", "1,2", "--boot", "30", "--min-rows", "20"])
     cdf = pd.read_csv(sig / "analysis" / "controls.csv")
-    assert {"probe ALL", "B5 text+question"} <= set(cdf.model) and cdf.model.str.startswith("ADDED VALUE").any()
+    assert {"probe ALL", "Bq text+question"} <= set(cdf.model) and cdf.model.str.startswith("ADDED VALUE").any()
     assert (sig / "analysis" / "controls.md").exists()

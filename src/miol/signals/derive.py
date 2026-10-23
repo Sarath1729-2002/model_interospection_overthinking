@@ -13,6 +13,8 @@ Named conditions (thresholds in tokens, `tau`):
 import numpy as np
 import pandas as pd
 
+CLIP = -20.0
+
 
 def _stable_from(flags: np.ndarray):
     """Smallest index i such that flags[i:] are all True; None if the last flag is False."""
@@ -55,8 +57,22 @@ def derive(df: pd.DataFrame, tau: int = 30):
             d_commit[idx] = pos - pos[cs]
         slack_g = int(max(rem[ts] - 1, 0)) if ts is not None else -1
         slack_c = int(max(rem[cs] - 1, 0)) if cs is not None else -1
-        traces.append({
-            "sample": sid, "n_ckpt": len(idx), "t_star": -1 if ts is None else ts, "c_star": -1 if cs is None else cs,
+        hb = g["has_boxed"].values if "has_boxed" in g else np.ones(len(idx))
+        ck_ = int(np.where(hb == 0)[0].max()) if (hb == 0).any() else 0          # last checkpoint before the conclusion paragraph
+        core_g = int(max(pos[ck_] - pos[ts], 0)) if ts is not None else -1
+        core_c = int(max(pos[ck_] - pos[cs], 0)) if cs is not None else -1
+        seen1 = lost = wobble = False
+        for x in eqg.astype(int).tolist():             # gold ... not-gold ... gold again
+            if x == 1:
+                wobble = wobble or lost
+                seen1 = True
+            elif seen1:
+                lost = True
+        traces.append({"concl_k": ck_, "slack_core_gold": core_g, "slack_core_commit": core_c,
+                       "cond_overthink_core": int(correct and ts is not None and core_g >= tau),
+                       "cond_rationalize_core": int((not correct) and cs is not None and core_c >= tau),
+                       "cond_wobble": int(wobble),
+                       "sample": sid, "n_ckpt": len(idx), "t_star": -1 if ts is None else ts, "c_star": -1 if cs is None else cs,
             "slack_gold": slack_g, "slack_commit": slack_c, "flips": flips, "correct": int(correct),
             "first_gold_k": int(np.argmax(eqg)) if eqg.any() else -1,
             "cond_overthink": int(correct and ts is not None and slack_g >= tau),
@@ -69,4 +85,30 @@ def derive(df: pd.DataFrame, tau: int = 30):
     df["d_gold"], df["d_commit"] = d_gold, d_commit
     df["committed_wrong"] = (df["commit"].astype(bool) & (df["correct"] == 0)).astype(int)
     df["converged_right"] = (df["conv_gold"].astype(bool) & (df["correct"] == 1)).astype(int)
-    return df, pd.DataFrame(traces)
+    trd = pd.DataFrame(traces)
+    ck_map = trd.set_index("sample")["concl_k"]
+    df["pre_concl"] = (df["k"].values <= ck_map.loc[df["sample"].values].values).astype(int)
+    if "a" in df.columns:
+        df = add_forecasts(df)
+    return df, trd
+
+
+def add_forecasts(df: pd.DataFrame) -> pd.DataFrame:
+    """Targets about the NEXT step / the REST of the trace (all exact; NaN where undefined).  df sorted by (sample, k)."""
+    g = df.groupby("sample", sort=False)
+    a = np.clip(df["a"].astype(float), CLIP, 0.0)
+    a_next = a.groupby(df["sample"], sort=False).shift(-1)
+    df["a_next"] = a_next.values
+    df["da"] = np.clip((a_next - a).values, -10.0, 10.0)
+    eq = df["eq_gold"].astype(float)
+    eq_next = eq.groupby(df["sample"], sort=False).shift(-1)
+    has_next = eq_next.notna()
+    df["loss_next"] = np.where((eq == 1) & has_next, (eq_next == 0).astype(float), np.nan)      # holds the gold answer now: loses it next step?
+    df["gain_next"] = np.where((eq == 0) & has_next, (eq_next == 1).astype(float), np.nan)      # does not hold it now: gains it next step?
+    df["loss_end"] = np.where(eq == 1, 1.0 - df["correct"].astype(float), np.nan)               # holds it now: will the trace still end wrong?
+    df["y_end"] = df["correct"].astype(float)
+    forced = df["forced"].fillna("").astype(str)
+    chg = (forced != forced.groupby(df["sample"], sort=False).shift(-1)).astype(float)
+    chg[eq_next.isna().values] = 0.0                                                            # no next checkpoint -> no change
+    df["flips_rem"] = chg.groupby(df["sample"], sort=False).transform(lambda x: x[::-1].cumsum()[::-1]).values
+    return df

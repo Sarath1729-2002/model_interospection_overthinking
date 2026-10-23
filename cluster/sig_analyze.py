@@ -16,13 +16,14 @@ from miol.signals import io as sio  # noqa: E402
 
 def headline(D, cmp_df):
     L = []
-    for t in ("a", "f", "d_gold", "d_commit", "rem"):
-        sub = cmp_df[(cmp_df.target == t) & (cmp_df.vs == "B4")]
+    for t in ("a", "f", "d_gold", "d_commit", "a_next", "da", "ent_next", "hedge_next", "rem"):
+        rival = "B5" if (cmp_df.vs == "B5").any() else "B4"
+        sub = cmp_df[(cmp_df.target == t) & (cmp_df.vs == rival)]
         if len(sub) == 0:
             continue
         allr = sub[sub.probe.str.startswith("ALL")]
         r = (allr if len(allr) else sub).iloc[0]
-        L.append(f"- **{t}**: probe {r['probe']}  R2 {r['probe_R2']};  vs text baseline B4: dMAE {r['dMAE (probe-base)']}  -> {r['verdict']}")
+        L.append(f"- **{t}**: probe {r['probe']}  R2 {r['probe_R2']};  vs strongest linear text baseline ({rival}): dMAE {r['dMAE (probe-base)']}  -> {r['verdict']}")
     return "\n".join(L)
 
 
@@ -49,6 +50,8 @@ def main(argv=None):
     mon.to_csv(adir / "monitors.csv", index=False)
     ee = an.early_exit(D)
     ee.to_csv(adir / "early_exit.csv", index=False)
+    bt2 = an.binary_tasks(D, max(B // 2, 100))
+    bt2.to_csv(adir / "binary_events.csv", index=False)
     rv = an.rollout_validation(D)
     rv.to_csv(adir / "rollout_validation.csv", index=False)
     pv = an.prevalence(D)
@@ -94,6 +97,7 @@ def main(argv=None):
     R.append("## Within-trace ordering (does the probe follow the target INSIDE a trace?)\n" + an.md(wt))
     R.append("## Before the text shows it\n" + an.md(bt))
     R.append("## Condition monitors\n" + an.md(mon))
+    R.append("## Events a monitor would care about (AUROC; fg/ff = forced answer is gold / the trace's own answer)\n" + an.md(bt2))
     R.append("## Early exit on predicted P(gold) (eval problems)\n"
              "Exit at the first line boundary (k>=1, not the last) whose P(gold) estimate reaches theta; accuracy = the forced answer there. "
              "The ORACLE and TRUE rows need the gold answer / a model call per step and are upper bounds, not deployable.\n" + an.md(ee))

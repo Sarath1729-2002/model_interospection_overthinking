@@ -22,28 +22,37 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from miol.data.hidden_states_dataset import split_indices  # noqa: E402
 from miol.signals import io as sio  # noqa: E402
-from miol.signals.baselines import LEVELS, run_baselines  # noqa: E402
+from miol.signals.baselines import default_levels, run_baselines  # noqa: E402
 from miol.signals.metrics import mae, r2  # noqa: E402
 from miol.signals.ridge import RATIOS, fit_layer, kernel_allcat, pick_ratio  # noqa: E402
 from miol.signals.targets import CLIP, build_targets  # noqa: E402
+
+
+UNIT = {"fg", "ff", "r_pgold", "r_pfinal", "pct", "loss_next", "gain_next", "loss_end", "y_end", "p1max"}
+NONNEG = {"rem", "r_H", "ent1", "ent_next", "surp_next", "ent_rem", "hedge_next", "hedge_rem", "flips_rem", "steps_rem", "len_next"}
 
 
 def postprocess(P: np.ndarray, names):
     """Clip predictions to each target's feasible range (applied identically to every model)."""
     P = P.copy()
     for j, n in enumerate(names):
-        if n in ("a", "f"):
+        if n in ("a", "f", "a_next"):
             P[:, j] = np.clip(P[:, j], CLIP, 0.0)
-        elif n in ("fg", "ff", "r_pgold", "r_pfinal", "pct"):
+        elif n in UNIT:
             P[:, j] = np.clip(P[:, j], 0.0, 1.0)
-        elif n in ("rem", "r_H"):
+        elif n in NONNEG:
             P[:, j] = np.maximum(P[:, j], 0.0)
+        elif n == "da":
+            P[:, j] = np.clip(P[:, j], -10.0, 10.0)
     return P
 
 
-def split_samples(run_dir, val_fraction, split_seed):
-    files = sorted(sio.hs_dir(run_dir, "train").glob("sample_*.safetensors"))
-    ids = [int(f.stem.split("_")[1]) for f in files]
+def split_samples(run_dir, val_fraction, split_seed, ids=None):
+    """Validation problems = the fixed split_indices() split of the train problems (same rule as the paper's probes).
+    ids=None: the cached safetensors files of the train split (GSM8K run); else an explicit sorted list of sample ids (MATH run)."""
+    if ids is None:
+        files = sorted(sio.hs_dir(run_dir, "train").glob("sample_*.safetensors"))
+        ids = [int(f.stem.split("_")[1]) for f in files]
     _, va = split_indices(len(ids), val_fraction, split_seed)
     return {ids[i] for i in va}
 
@@ -87,6 +96,8 @@ def main(argv=None):
     ap.add_argument("--no-allcat", action="store_true")
     ap.add_argument("--no-rollouts", action="store_true")
     ap.add_argument("--no-mlp", action="store_true")
+    ap.add_argument("--split-source", default="files", choices=["files", "labels"], help="labels: validation split drawn from the label table (MATH run)")
+    ap.add_argument("--save-weights", action="store_true", help="save the per-layer probe weights (for the transfer test)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     a = ap.parse_args(argv)
     log = sio.log_to("[probes]")
@@ -97,7 +108,8 @@ def main(argv=None):
     t0 = time.time()
 
     tr, ev = sio.read_table(out / "labels_train.csv"), sio.read_table(out / "labels_eval.csv")
-    val_ids = split_samples(a.run_dir, a.val_fraction, a.split_seed)
+    val_ids = split_samples(a.run_dir, a.val_fraction, a.split_seed,
+                            ids=sorted(int(x) for x in tr["sample"].unique()) if a.split_source == "labels" else None)
     is_val = tr["sample"].isin(val_ids).values
     full = pd.concat([tr, ev], ignore_index=True)
     Yall, names = build_targets(full, include_rollouts=not a.no_rollouts)
@@ -111,9 +123,10 @@ def main(argv=None):
 
     preds = {"val": {}, "test": {}}
     chosen = {}
+    weights = {}
 
     # ---- baselines ----------------------------------------------------------------------------------------
-    levels = [l for l in LEVELS if not (a.no_mlp and l == "B3_mlp")]
+    levels = [l for l in default_levels(dfs["fit"]) if not (a.no_mlp and l.endswith("_mlp"))]
     bl = run_baselines(dfs, Y, a.device, levels, log)
     for lv in levels:
         for s in ("val", "test"):
@@ -149,6 +162,10 @@ def main(argv=None):
             rr.append(RATIOS[r])
         preds["val"][f"L{l}"], preds["test"][f"L{l}"] = postprocess(pv, names), postprocess(pt, names)
         chosen[f"L{l}"] = dict(zip(names, rr))
+        if a.save_weights:
+            ridx = [RATIOS.index(r_) for r_ in rr]
+            weights[l] = {"mu": lf.mu.cpu(), "sd": lf.sd.cpu(),
+                          "W": torch.stack([lf.W[j][ridx[j]] for j in range(T)]).cpu(), "b": torch.tensor([float(lf.b[j][ridx[j]]) for j in range(T)])}
         del Xv, Xt, lf
         if dev.type == "cuda":
             torch.cuda.empty_cache()
@@ -187,6 +204,8 @@ def main(argv=None):
         for m, P in preds[s].items():
             arrays[f"{s}/{m}"] = P.astype(np.float32)
     np.savez_compressed(pdir / "preds.npz", **arrays)
+    if weights:
+        torch.save({"targets": names, "layers": weights}, pdir / "weights_layers.pt")
     meta = {"targets": names, "models": list(preds["test"].keys()), "chosen_ratio": chosen,
             "n": {k: int(len(v)) for k, v in parts.items()}, "val_fraction": a.val_fraction, "split_seed": a.split_seed,
             "kernel_max_fit": a.kernel_max_fit, "layers": layers, "minutes": (time.time() - t0) / 60}
