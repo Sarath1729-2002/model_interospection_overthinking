@@ -53,6 +53,21 @@ export HF_HOME="$ROOT/hf_home"
 export WANDB_DIR="$ROOT/wandb"
 export RUN_DIR="$ROOT/outputs/$RUN_NAME"
 
+# ---- signals experiment (cluster/submit_signals.sh) ---------------------------------------------------------------
+# Forced-answer probes on the cached GSM8K run: needs RUN_DIR/hidden_states from the extract stage. Outputs: $RUN_DIR/signals/
+export SIG_MODE="${SIG_MODE:-lines}"                      # checkpoints: lines = every blank-line boundary; both = + every SIG_STRIDE tokens
+export SIG_STRIDE="${SIG_STRIDE:-8}"
+export SIG_TAU="${SIG_TAU:-30}"                           # tokens written after convergence/commitment that make it a 'condition'
+export SIG_LIMIT_TRAIN="${SIG_LIMIT_TRAIN:-0}"            # 0 = all cached train traces
+export SIG_LIMIT_EVAL="${SIG_LIMIT_EVAL:-0}"
+export SIG_GATE_N="${SIG_GATE_N:-300}"                    # eval traces scored by the feasibility gate
+export SIG_ROLLOUTS="${SIG_ROLLOUTS:-1}"                  # 1 = also resample continuations (validation + extra targets)
+export SIG_ROLL_TRAIN="${SIG_ROLL_TRAIN:-2000}"           # traces that get rollouts (train / eval)
+export SIG_ROLL_EVAL="${SIG_ROLL_EVAL:-600}"
+export SIG_ROLL_M="${SIG_ROLL_M:-4}"                      # continuations per checkpoint
+export SIG_KERNEL_MAX_FIT="${SIG_KERNEL_MAX_FIT:-50000}"  # rows used by the all-layer dual ridge (memory: ~3 n^2 floats)
+export SIG_STATES_WORKERS="${SIG_STATES_WORKERS:-8}"
+
 # ---- runtime (compute nodes have no internet) -------------------------------
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}" TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export WANDB_MODE="${WANDB_MODE:-offline}" TOKENIZERS_PARALLELISM=false PYTHONUNBUFFERED=1

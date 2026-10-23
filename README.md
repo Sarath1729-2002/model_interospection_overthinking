@@ -6,6 +6,7 @@ This project extends the code of *How Much is Left? LLMs Linearly Encode Their R
 to **Qwen2.5-7B-Instruct on the full GSM8K**, with batched/async hidden-state extraction and a small Alliance (Compute Canada) runner.
 
 * Running on the cluster: **[cluster/GUIDE.md](cluster/GUIDE.md)**
+* Forced-answer signals experiment (probes for what the model knows / is committed to along its reasoning): **[cluster/GUIDE_SIGNALS.md](cluster/GUIDE_SIGNALS.md)**
 * Python package is still called `miol` (kept so the upstream code and configs work unchanged).
 * Tests: `pip install -e ".[dev]" && pytest` (164 tests, CPU only).
 
