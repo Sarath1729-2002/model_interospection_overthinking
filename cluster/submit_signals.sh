@@ -28,6 +28,10 @@ if [[ "$MODE" == "gate" ]]; then
   notify "signals gate SUBMITTED" "gate=$j"
   exit 0
 fi
+if [[ "$MODE" == "controls" ]]; then   # only the controls, after a finished full run (needs signals/probes/preds.npz)
+  j=$(sub controls "$T_PROBE" "" "${LIGHT[@]}")
+  echo "submitted controls=$j"; exit 0
+fi
 ck=$(sub ckpt "$T_CKPT" "" "${LIGHT[@]}")
 sc=$(sub score "$T_SCORE" "$ck")
 st=$(sub states "$T_STATES" "$ck" "${LIGHT[@]}")

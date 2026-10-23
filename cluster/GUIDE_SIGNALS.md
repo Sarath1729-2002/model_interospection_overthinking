@@ -41,6 +41,13 @@ G3 some correct traces converge before the end (>= 20%).
 If G1 fails, fix the cue (`--cue` in `sig_score.py`) before anything else; if G2/G3 fail the signal is not there for this model/dataset and the full run will not rescue it.
 Stages are resumable (finished chunks are skipped); resubmit the same command after a timeout.
 
+## Controls (after the full run): is it the reasoning state, or just how hard the question is?
+```bash
+MODE=controls bash cluster/submit_signals.sh      # ~15-30 min, 1 GPU;  reads signals/analysis/controls.md afterwards
+```
+Fits Q0 (a probe on the prompt-end state of the same trace, which has seen only the question) and B5 (B4 + a bag of words of the question), then stacks
+them on the validation split and reports the probe's ADDED VALUE on test with a bootstrap CI.
+
 ## Outputs (`$RUN_DIR/signals/`)
 `ckpt_*.csv`, `traces_*.csv` (tables) - `score_parts/`, `roll_parts/` (raw chunks) - `labels_*.csv`, `traces_labeled_*.csv`, `gate_report_*.txt`
 - `states_*.npy` (float16 [layers, checkpoints, 3584]; ~16 GB train) - `probes/{preds.npz,meta.json,scores_test.csv}` -

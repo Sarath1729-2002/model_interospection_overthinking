@@ -9,6 +9,7 @@
 #   derive   : merge scores, derive convergence/commitment labels + conditions, print the gate report
 #   probes   : all ridge probes + baselines                                       1 GPU
 #   analyze  : tables, plots, report.md                                           CPU
+#   controls : question-only probe (Q0) + text-with-question baseline (B5) + stacking   1 GPU
 #SBATCH --job-name=sig
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -45,7 +46,7 @@ LIM_ARGS_TRAIN=(); LIM_ARGS_EVAL=()
 [[ "$SIG_LIMIT_TRAIN" != "0" ]] && LIM_ARGS_TRAIN=(--limit "$SIG_LIMIT_TRAIN")
 [[ "$SIG_LIMIT_EVAL" != "0" ]] && LIM_ARGS_EVAL=(--limit "$SIG_LIMIT_EVAL")
 
-case "${STAGE:?set STAGE=gate|ckpt|score|states|rollouts|derive|probes|analyze}" in
+case "${STAGE:?set STAGE=gate|ckpt|score|states|rollouts|derive|probes|analyze|controls}" in
 gate)
   G="$RUN_DIR/signals_gate"; mkdir -p "$G"
   notify "signals GATE started" "$SIG_GATE_N eval traces"
@@ -96,6 +97,10 @@ PY
 analyze)
   python cluster/sig_analyze.py --run-dir "$RUN_DIR" --out "$SIG"
   notify "signals: ANALYSIS ready" "$(sed -n 1,30p "$SIG/analysis/report.md")"
+  ;;
+controls)
+  python cluster/sig_controls.py --run-dir "$RUN_DIR" --out "$SIG" --val-fraction "$VAL_FRACTION" --layers "${SIG_CONTROL_LAYERS:-16,20,22}"
+  notify "signals: controls DONE in $(elapsed)" "$(grep -E 'ADDED VALUE' "$SIG/analysis/controls.md" | cut -c1-200 | head -20)"
   ;;
 *) echo "unknown STAGE=$STAGE"; exit 2 ;;
 esac

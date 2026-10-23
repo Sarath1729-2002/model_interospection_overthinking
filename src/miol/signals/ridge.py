@@ -22,6 +22,22 @@ def standardise_stats(Z: torch.Tensor):
     return mu, sd
 
 
+def _eigh(G: torch.Tensor):
+    """eigh that survives rank-deficient Gram matrices (duplicate / constant columns): retry with a tiny diagonal jitter
+    (1e-10 of the mean diagonal - far below the smallest ridge strength), then on CPU."""
+    try:
+        return torch.linalg.eigh(G)
+    except torch._C._LinAlgError:
+        pass
+    jit = 1e-10 * float(G.diagonal().mean().clamp_min(1e-12))
+    Gj = G + jit * torch.eye(G.shape[0], dtype=G.dtype, device=G.device)
+    try:
+        return torch.linalg.eigh(Gj)
+    except torch._C._LinAlgError:
+        e, Q = torch.linalg.eigh(Gj.cpu())
+        return e.to(G.device), Q.to(G.device)
+
+
 class LayerFit:
     def __init__(self, mu, sd, W, b, ratios):
         self.mu, self.sd, self.W, self.b, self.ratios = mu, sd, W, b, ratios     # W[t]: [R, D], b[t]: [R]
@@ -64,7 +80,7 @@ def fit_layer(Xfit: torch.Tensor, Y: np.ndarray, ratios: Sequence[float] = RATIO
         Yg = torch.tensor(Y[m][:, ts], dtype=torch.float64, device=dev)
         ybar = Yg.mean(0)
         B = Z[mt].double().T @ (Yg - ybar)                                    # [D, Tg]
-        evals, Q = torch.linalg.eigh(Gc)
+        evals, Q = _eigh(Gc)
         evals = evals.clamp_min(0)
         QB = Q.T @ B
         for r_i, r in enumerate(ratios):
