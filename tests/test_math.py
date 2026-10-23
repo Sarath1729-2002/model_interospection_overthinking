@@ -39,6 +39,31 @@ def test_math_answers():
     assert md.parse_final_math("\\boxed{\\frac{1}{2}}") is None
 
 
+def test_checkpoint_cap_and_r1_prompt(ctok):
+    from miol.signals.checkpoints import checkpoint_positions
+    nl = ctok.idx["\n\n"]
+    comp = []
+    for i in range(100):
+        comp += [5, 6, nl]
+    comp += [ctok.eos_token_id]
+    full = checkpoint_positions(comp, {nl}, ctok.eos_token_id, True, "lines", 8)
+    cap = checkpoint_positions(comp, {nl}, ctok.eos_token_id, True, "lines", 8, max_ckpt=12)
+    assert len(full) == 101 and len(cap) == 12
+    assert cap[0][1] == "prompt" and cap[-1] == full[-1] and [c for c in cap if c[0] >= 0] == sorted(c for c in cap if c[0] >= 0)
+    assert checkpoint_positions(comp, {nl}, ctok.eos_token_id, True, "lines", 8, max_ckpt=500) == full
+    t = md.prompt_text(ctok, "What is 2+2?", "")
+    assert t.endswith("<think>\n") and "boxed" in t and not t.startswith("S:")
+    assert md.prompt_text(ctok, "What is 2+2?").startswith("S:")
+
+
+def test_generate_in_batches(ctok, tiny_model):
+    from miol.signals.worker import Worker
+    w = Worker(tiny_model, ctok, "cpu", "", "x", 6, gen_batch=2, max_ckpt=5, log=lambda *_: None)
+    prompts = [ctok.encode("A:" + "a" * (3 + i)) for i in range(5)]
+    outs = w._generate(prompts, 0)
+    assert len(outs) == 5 and all(len(c) <= 6 and isinstance(h, bool) for c, h in outs)
+
+
 def _canned(tok):
     def gen(prompts, seed):
         out = []
@@ -106,6 +131,10 @@ def test_math_pipeline_tiny(tmp_path, ctok, tiny_model):
     a = _load("sig_analyze")
     a.main(["--run-dir", run, "--out", str(sig), "--boot", "20"])
     assert (sig / "analysis" / "report.md").exists()
+
+    cmp_ = _load("msig_compare")
+    txt = cmp_.main(["--a", str(sig), "--b", str(sig), "--name-a", "x", "--name-b", "y", "--out", str(sig / "analysis" / "cmp.md")])
+    assert "## Behaviour" in txt and "Probe R2" in txt and (sig / "analysis" / "cmp.md").exists()
 
     t = _load("msig_transfer")
     t.main(["--math-out", str(sig), "--gsm-out", str(sig), "--layers", "1,2", "--device", "cpu"])

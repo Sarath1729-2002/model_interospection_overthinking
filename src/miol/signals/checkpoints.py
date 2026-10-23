@@ -20,7 +20,7 @@ from miol.signals.text_utils import (boundary_token_ids, parse_final_answer, par
 
 
 def checkpoint_positions(comp_ids: List[int], boundary_ids: set, eos_id: Optional[int], has_eos: bool,
-                         mode: str = "lines", stride: int = 8) -> List[Tuple[int, str]]:
+                         mode: str = "lines", stride: int = 8, max_ckpt: int = 0) -> List[Tuple[int, str]]:
     n = len(comp_ids)
     last = n - 1
     if has_eos and n >= 1 and eos_id is not None and comp_ids[-1] == eos_id:
@@ -38,7 +38,13 @@ def checkpoint_positions(comp_ids: List[int], boundary_ids: set, eos_id: Optiona
             kinds.setdefault(p, "stride")
             p += stride
     kinds[last] = "final"
-    return sorted(kinds.items())
+    out = sorted(kinds.items())
+    if max_ckpt and len(out) > max_ckpt:            # long traces: keep the prompt end, the final checkpoint and an even spread between
+        inner = out[1:-1]
+        take = max_ckpt - 2
+        idx = sorted({int(round(i * (len(inner) - 1) / max(take - 1, 1))) for i in range(take)}) if take > 0 else []
+        out = [out[0]] + [inner[i] for i in idx] + [out[-1]]
+    return out
 
 
 def gsm8k_gold_map(hf_dataset: str = "openai/gsm8k", hf_config: str = "main") -> Dict[str, str]:

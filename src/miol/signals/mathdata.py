@@ -114,6 +114,17 @@ def read_problems(path: Path) -> List[dict]:
     return [json.loads(l) for l in open(path)]
 
 
+USER_INSTRUCTION = "Please reason step by step, and put your final answer within \\boxed{}."
+
+
 def prompt_text(tok, problem: str, system: str = SYSTEM_PROMPT_MATH) -> str:
-    msgs = [{"role": "system", "content": system}, {"role": "user", "content": problem}]
-    return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+    """system != '': Qwen-style (system message + problem).  system == '': R1-style (no system message; the same instruction goes
+    into the user turn, and the prompt is guaranteed to end inside an open <think> block)."""
+    if system:
+        msgs = [{"role": "system", "content": system}, {"role": "user", "content": problem}]
+        return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+    msgs = [{"role": "user", "content": problem + "\n" + USER_INSTRUCTION}]
+    text = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+    if "<think>" not in text[-40:]:
+        text += "<think>\n"
+    return text

@@ -3,6 +3,7 @@
 #   bash cluster/setup_math.sh
 set -euo pipefail
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."
+unset RUN_NAME RUN_DIR
 export DATA=math
 source cluster/config.sh
 unset HF_HUB_OFFLINE HF_DATASETS_OFFLINE TRANSFORMERS_OFFLINE

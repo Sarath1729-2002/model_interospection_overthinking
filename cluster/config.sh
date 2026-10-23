@@ -123,6 +123,17 @@ launch() {
 # ---- MATH signals experiment (cluster/setup_math.sh, cluster/submit_math.sh) ----------------------------------------
 # Own run folder (DATA=math -> $ROOT/outputs/${MODEL}-math): generation, forced-answer scoring and hidden states are all done in
 # ONE pass by cluster/msig_worker.py, so no cached extraction is needed.  GSM8K run (for the transfer test): $GSM_RUN_DIR/signals.
+# MSIG_STYLE=qwen (default; Qwen2.5-Instruct: system prompt, short solutions) | r1 (DeepSeek-R1-Distill: no system prompt, <think> block,
+# sampling T=0.6/top_p=0.95, long solutions -> bigger cap, smaller generation batches, capped checkpoints per trace)
+export MSIG_STYLE="${MSIG_STYLE:-qwen}"
+if [[ "$MSIG_STYLE" == "r1" ]]; then
+  MSIG_MAX_NEW="${MSIG_MAX_NEW:-6144}"; MSIG_TEMP="${MSIG_TEMP:-0.6}"; MSIG_TOP_P="${MSIG_TOP_P:-0.95}"; MSIG_TOP_K="${MSIG_TOP_K:-0}"
+  MSIG_GEN_BATCH="${MSIG_GEN_BATCH:-32}"; MSIG_MAX_CKPT="${MSIG_MAX_CKPT:-40}"; MSIG_TRAIN_N="${MSIG_TRAIN_N:-2000}"; MSIG_CHUNK="${MSIG_CHUNK:-64}"
+  MSIG_TRANSFER="${MSIG_TRANSFER:-0}"
+fi
+export MSIG_TEMP="${MSIG_TEMP:-0.7}" MSIG_TOP_P="${MSIG_TOP_P:-0.8}" MSIG_TOP_K="${MSIG_TOP_K:-20}" MSIG_GEN_BATCH="${MSIG_GEN_BATCH:-0}"
+export MSIG_MAX_CKPT="${MSIG_MAX_CKPT:-0}" MSIG_TRANSFER="${MSIG_TRANSFER:-1}"
+export MSIG_CUE="${MSIG_CUE:-}"                           # empty = the default cue (same for both models, so the runs are comparable)
 export MSIG_TRAIN_N="${MSIG_TRAIN_N:-0}"                  # train problems used (0 = every integer-answer MATH train problem)
 export MSIG_TEST_N="${MSIG_TEST_N:-1000}"                 # held-out problems (0 = all)
 export MSIG_GATE_N="${MSIG_GATE_N:-160}"                  # problems of the quick gate

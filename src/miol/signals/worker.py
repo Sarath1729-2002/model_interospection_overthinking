@@ -33,10 +33,12 @@ def _bow_str(text: str, dim: int = 2048) -> str:
 class Worker:
     def __init__(self, model, tok, device, system: str = SYSTEM_PROMPT_MATH, cue: str = DEFAULT_CUE, max_new: int = 2048,
                  gen_kw: Optional[dict] = None, fwd_token_budget: int = 14000, score_token_budget: int = 24000,
-                 score_max_batch: int = 48, mode: str = "lines", stride: int = 8, seed: int = 0, log=print):
+                 score_max_batch: int = 48, mode: str = "lines", stride: int = 8, seed: int = 0, log=print,
+                 gen_batch: int = 0, max_ckpt: int = 0):
         self.model, self.tok, self.device, self.system, self.max_new = model, tok, device, system, max_new
         self.gen_kw = gen_kw if gen_kw is not None else dict(temperature=0.7, top_p=0.8, top_k=20)
         self.fwd_token_budget, self.mode, self.stride, self.seed, self.log = fwd_token_budget, mode, stride, seed, log
+        self.gen_batch, self.max_ckpt = gen_batch, max_ckpt
         self.base = getattr(model, getattr(model, "base_model_prefix", "model"), model)
         self.head = model.get_output_embeddings()
         self.pad_id = tok.pad_token_id if tok.pad_token_id is not None else 0
@@ -77,8 +79,14 @@ class Worker:
                 outs.append((row[:cut + 1], True) if cut is not None else (row, False))
             return outs
 
-        for i, o in zip(order, self.scorer._guard(run, order)):
-            res[i] = o
+        gb = self.gen_batch or len(order)
+        for b in range(0, len(order), gb):
+            idx = order[b:b + gb]
+            t0 = time.time()
+            for i, o in zip(idx, self.scorer._guard(run, idx)):
+                res[i] = o
+            if self.gen_batch:
+                self.log(f"generated {min(b + gb, len(order))}/{len(order)} ({time.time() - t0:.0f}s for this batch)")
         return res
 
     # ------------------------------------------------------------------ checkpoint rows (no model needed)
@@ -89,7 +97,7 @@ class Worker:
         final = parse_final_math(text_noeos)
         gold = str(prob["gold"])
         correct = int(final is not None and final == gold)
-        cps = checkpoint_positions(c_ids, self.boundary, c_ids[-1], True, self.mode, self.stride)
+        cps = checkpoint_positions(c_ids, self.boundary, c_ids[-1], True, self.mode, self.stride, self.max_ckpt)
         m = len(cps) - 1
         qbow = _bow_str(prob["problem"])
         rows = []

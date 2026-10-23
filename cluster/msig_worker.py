@@ -40,6 +40,11 @@ def main(argv=None, tok=None, model=None, worker_hook=None):
     ap.add_argument("--model-id", default="Qwen/Qwen2.5-7B-Instruct")
     ap.add_argument("--cue", default=DEFAULT_CUE)
     ap.add_argument("--system", default=SYSTEM_PROMPT_MATH)
+    ap.add_argument("--gen-batch", type=int, default=0, help="prompts per generate() call (0 = the whole chunk, halved on OOM)")
+    ap.add_argument("--max-ckpt", type=int, default=0, help="cap on checkpoints per trace (long-CoT models); 0 = every blank line")
+    ap.add_argument("--temperature", type=float, default=0.7)
+    ap.add_argument("--top-p", type=float, default=0.8)
+    ap.add_argument("--top-k", type=int, default=20, help="0 disables top-k")
     ap.add_argument("--mode", default="lines")
     ap.add_argument("--stride", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
@@ -56,6 +61,7 @@ def main(argv=None, tok=None, model=None, worker_hook=None):
     tok = tok or sio.load_tokenizer(a.model_id)
     model = model or sio.load_model(a.model_id, a.device)
     w = Worker(model, tok, a.device, a.system, a.cue, a.max_new, mode=a.mode, stride=a.stride, seed=a.seed,
+               gen_kw=dict(temperature=a.temperature, top_p=a.top_p, top_k=a.top_k), gen_batch=a.gen_batch, max_ckpt=a.max_ckpt,
                log=sio.log_to(f"[worker {a.split} s{a.shard}]"))
     if worker_hook:
         worker_hook(w)

@@ -6,6 +6,7 @@
 # Resubmitting is safe: finished chunks are skipped.  MSIG_ROLLOUTS=1 adds the resampled-continuation arm.
 set -euo pipefail
 cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.."
+unset RUN_NAME RUN_DIR
 export DATA=math
 source cluster/config.sh
 [[ -z "$SBATCH_ACCOUNT" ]] && { echo "Set SBATCH_ACCOUNT in cluster/config.sh"; exit 1; }
@@ -27,7 +28,7 @@ if [[ "$MODE" == "extras" ]]; then
   t=$(sub transfer 00:30:00 "" "${LIGHT[@]}"); s=$(sub steer 00:40:00 "" "${LIGHT[@]}")
   echo "submitted transfer=$t steer=$s"; exit 0
 fi
-wk=$(sub work 12:00:00 "")
+wk=$(sub work 24:00:00 "")
 mg=$(sub merge 00:45:00 "$wk" "${LIGHT[@]}")
 dep="$mg"; msg="work=$wk merge=$mg"
 if [[ "$MSIG_ROLLOUTS" == "1" ]]; then
@@ -36,7 +37,7 @@ fi
 pr=$(sub probes 04:00:00 "$dep" "${LIGHT[@]}")
 co=$(sub controls 01:30:00 "$pr" "${LIGHT[@]}")
 an=$(sub analyze 00:45:00 "$pr" "${LIGHT[@]}")
-tr=$(sub transfer 00:30:00 "$pr" "${LIGHT[@]}")
+tr=""; [[ "$MSIG_TRANSFER" == "1" ]] && tr=$(sub transfer 00:30:00 "$pr" "${LIGHT[@]}")
 st=$(sub steer 00:40:00 "$pr" "${LIGHT[@]}")
-msg="$msg probes=$pr controls=$co analyze=$an transfer=$tr steer=$st"
+msg="$msg probes=$pr controls=$co analyze=$an transfer=${tr:-skipped} steer=$st"
 echo "submitted: $msg   (watch: squeue -u \$USER)"; notify "math pipeline SUBMITTED" "$msg"

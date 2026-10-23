@@ -19,6 +19,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=%x-%j.out
 set -euo pipefail
+unset RUN_NAME RUN_DIR
 export DATA=math
 source "${SLURM_SUBMIT_DIR}/cluster/config.sh"
 module purge 2>/dev/null || true
@@ -42,7 +43,10 @@ run_sharded() {
   for p in "${pids[@]}"; do wait "$p" || rc=1; done
   return $rc
 }
-WORK=(--run-dir "$RUN_DIR" --out "$SIG" --model-id "$MODEL_ID" --max-new "$MSIG_MAX_NEW" --chunk-problems "$MSIG_CHUNK")
+GEN=(--temperature "$MSIG_TEMP" --top-p "$MSIG_TOP_P" --top-k "$MSIG_TOP_K" --gen-batch "$MSIG_GEN_BATCH" --max-ckpt "$MSIG_MAX_CKPT")
+[[ "$MSIG_STYLE" == "r1" ]] && GEN+=(--system "")
+[[ -n "$MSIG_CUE" ]] && GEN+=(--cue "$MSIG_CUE")
+WORK=(--run-dir "$RUN_DIR" --out "$SIG" --model-id "$MODEL_ID" --max-new "$MSIG_MAX_NEW" --chunk-problems "$MSIG_CHUNK" "${GEN[@]}")
 PROBE_ARGS=(--run-dir "$RUN_DIR" --out "$SIG" --val-fraction "$VAL_FRACTION" --split-source labels)
 [[ -f "$RUN_DIR/problems_test.jsonl" ]] || { echo "no problem lists: run bash cluster/setup_math.sh on the login node first"; exit 1; }
 
@@ -50,7 +54,7 @@ case "${STAGE:?set STAGE}" in
 gate)
   G="$RUN_DIR/signals_gate"; mkdir -p "$G"
   notify "math GATE started" "$MSIG_GATE_N test problems"
-  run_sharded cluster/msig_worker.py --run-dir "$RUN_DIR" --out "$G" --model-id "$MODEL_ID" --max-new "$MSIG_MAX_NEW" --chunk-problems 40 --split test --limit "$MSIG_GATE_N"
+  run_sharded cluster/msig_worker.py --run-dir "$RUN_DIR" --out "$G" --model-id "$MODEL_ID" --max-new "$MSIG_MAX_NEW" --chunk-problems 40 --split test --limit "$MSIG_GATE_N" "${GEN[@]}"
   python cluster/msig_merge.py --run-dir "$RUN_DIR" --out "$G" --splits test
   notify "math GATE done in $(elapsed)" "$(cat "$G/gate_report_eval.txt")"
   ;;
@@ -66,7 +70,7 @@ merge)
   ;;
 rollouts)
   notify "math: rollouts STARTED"
-  RA=(--run-dir "$RUN_DIR" --out "$SIG" --model-id "$MODEL_ID" --data math --m "$MSIG_ROLL_M" --max-new "$MSIG_ROLL_MAX_NEW" --rows-per-batch 24)
+  RA=(--run-dir "$RUN_DIR" --out "$SIG" --model-id "$MODEL_ID" --data math --temperature "$MSIG_TEMP" --top-p "$MSIG_TOP_P" --top-k "$MSIG_TOP_K" --m "$MSIG_ROLL_M" --max-new "$MSIG_ROLL_MAX_NEW" --rows-per-batch 24)
   run_sharded cluster/sig_rollouts.py "${RA[@]}" --split eval --n-traces "$MSIG_ROLL_EVAL"
   run_sharded cluster/sig_rollouts.py "${RA[@]}" --split train --n-traces "$MSIG_ROLL_TRAIN"
   notify "math: rollouts DONE in $(elapsed)"
